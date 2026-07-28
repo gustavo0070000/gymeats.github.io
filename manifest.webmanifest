@@ -1,0 +1,18 @@
+{
+  "name": "GymEats",
+  "short_name": "GymEats",
+  "description": "Desafios de comida entre amigos. Todo dia, todo mundo posta o prato.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F2F2F2",
+  "theme_color": "#F2F2F2",
+  "lang": "pt-BR",
+  "categories": ["social", "lifestyle", "food"],
+  "icons": [
+    { "src": "./assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,119 @@
+rules_version = '2';
+
+// ============================================================
+//  Regras de segurança do GymEats
+//  Cole isto em: console.firebase.google.com > Firestore Database
+//  > aba "Regras" > Publicar.
+//
+//  Ideia geral: só quem está logado enxerga qualquer coisa, e só
+//  quem é membro de um desafio enxerga o conteúdo dele.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function challengeData(cid) {
+      return get(/databases/$(database)/documents/challenges/$(cid)).data;
+    }
+
+    function isMember(cid) {
+      return signedIn() && request.auth.uid in challengeData(cid).memberUids;
+    }
+
+    function isOwner(cid) {
+      return signedIn() && request.auth.uid == challengeData(cid).ownerUid;
+    }
+
+    // ---------- Perfis ----------
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(uid);
+      allow delete: if false;
+    }
+
+    // ---------- Códigos de convite ----------
+    // Qualquer pessoa logada pode resolver um código (é assim que se entra
+    // num desafio). O código não revela nada além do id do desafio.
+    match /codes/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    // ---------- Desafios ----------
+    match /challenges/{cid} {
+      // Só pode mexer na lista de membros, e só na própria entrada.
+      function onlyToggledOwnMembership() {
+        let before = resource.data.memberUids;
+        let after = request.resource.data.memberUids;
+        let me = request.auth.uid;
+        return signedIn()
+               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids'])
+               && ((!(me in before) && after == before.concat([me]))
+                   || ((me in before) && after == before.removeAll([me])));
+      }
+
+      allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
+      allow create: if signedIn()
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.memberUids == [request.auth.uid];
+      allow update: if isOwner(cid) || onlyToggledOwnMembership();
+      allow delete: if isOwner(cid);
+
+      // ---------- Ficha de membro (placar) ----------
+      match /members/{uid} {
+        allow read: if isMember(cid);
+        // cada um mexe na própria ficha; o dono também mexe nas dos outros,
+        // porque é ele quem recalcula o placar ao apagar um post alheio
+        allow create, update: if isSelf(uid) || isOwner(cid);
+        allow delete: if isSelf(uid) || isOwner(cid);
+      }
+
+      // ---------- Posts ----------
+      match /posts/{pid} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid) && request.resource.data.uid == request.auth.uid;
+        // qualquer membro pode reagir; o resto só o autor mexe
+        allow update: if isMember(cid) && (
+                        resource.data.uid == request.auth.uid ||
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount'])
+                      );
+        allow delete: if isMember(cid) && (resource.data.uid == request.auth.uid || isOwner(cid));
+
+        match /comments/{commentId} {
+          allow read: if isMember(cid);
+          allow create: if isMember(cid) && request.resource.data.uid == request.auth.uid;
+          allow update: if false;
+          allow delete: if isMember(cid) && (resource.data.uid == request.auth.uid || isOwner(cid));
+        }
+      }
+
+      // ---------- Bate-papo ----------
+      match /messages/{mid} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid) && request.resource.data.uid == request.auth.uid;
+        allow update: if false;
+        allow delete: if isMember(cid) && (resource.data.uid == request.auth.uid || isOwner(cid));
+      }
+    }
+
+    // ---------- Fotos em tamanho cheio ----------
+    // Ficam numa coleção própria pro feed não precisar baixá-las.
+    // O id é aleatório e imprevisível; qualquer pessoa logada que tenha
+    // o id pode ler (é o que permite o feed funcionar sem consultas caras).
+    match /photos/{photoId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+  }
+}
