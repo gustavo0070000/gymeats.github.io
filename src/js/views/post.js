@@ -7,6 +7,7 @@ import * as store from "../store.js";
 import { navigate } from "../router.js";
 import { compress, thumbnail } from "../image.js";
 import { PHOTO } from "../config.js";
+import { pickPlace } from "./place-picker.js";
 
 import {
   MEALS, mealById, CUISINES, cuisineById,
@@ -197,14 +198,16 @@ export function composeView({ cid }) {
             </div>
           </div>
 
-          <div class="card"><div class="field-inline">
-            <span class="ico">${icon("pin", 22)}</span>
-            <div class="field-body">
-              <input data-place placeholder="Onde foi? (opcional)" maxlength="60"
-                     style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
-            </div>
-            <button class="geo-btn" data-geo title="Usar minha localização">${icon("target", 20)}</button>
-          </div></div>
+          <div class="card">
+            <button class="field-inline place-btn" data-place-pick style="width:100%;text-align:left">
+              <span class="ico">${icon("pin", 22)}</span>
+              <span class="field-body">
+                <span class="place-name" data-place-label>Onde foi? (opcional)</span>
+                <span class="place-sub hidden" data-place-sub></span>
+              </span>
+              <span class="chev">${icon("chevron", 18)}</span>
+            </button>
+          </div>
 
           <div class="card"><div class="field-inline">
             <span class="ico" style="font-size:20px">💸</span>
@@ -267,23 +270,23 @@ export function composeView({ cid }) {
         b.classList.toggle("active", (b.dataset.homemade === "1") === homemade));
     });
 
-    el.querySelector("[data-geo]").addEventListener("click", (e) => {
-      const btn = e.currentTarget;
-      if (!navigator.geolocation) return toastError("Seu navegador não tem GPS.");
-      btn.classList.add("busy");
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          coords = {
-            lat: Number(pos.coords.latitude.toFixed(6)),
-            lng: Number(pos.coords.longitude.toFixed(6)),
-          };
-          btn.classList.remove("busy");
-          btn.classList.add("on");
-          toast("Localização marcada — vai pro mapa do guia.");
-        },
-        () => { btn.classList.remove("busy"); toastError("Não consegui pegar sua localização."); },
-        { enableHighAccuracy: true, timeout: 8000 },
-      );
+    let place = "";
+    const placeLabel = el.querySelector("[data-place-label]");
+    const placeSub = el.querySelector("[data-place-sub]");
+
+    const renderPlace = () => {
+      placeLabel.textContent = place || "Onde foi? (opcional)";
+      placeLabel.classList.toggle("filled", !!place);
+      placeSub.classList.toggle("hidden", !coords);
+      if (coords) placeSub.textContent = "📍 marcado no mapa";
+    };
+
+    el.querySelector("[data-place-pick]").addEventListener("click", async () => {
+      const picked = await pickPlace({ name: place, coords });
+      if (!picked) return;
+      place = picked.name;
+      coords = picked.coords;
+      renderPlace();
     });
 
     el.querySelector("[data-back]").addEventListener("click", () => showCamera());
@@ -310,7 +313,7 @@ export function composeView({ cid }) {
           mealType: meal,
           cuisine,
           homemade,
-          place: el.querySelector("[data-place]").value.trim(),
+          place,
           coords,
           price: parseFloat(el.querySelector("[data-price]").value),
           photo, thumb,

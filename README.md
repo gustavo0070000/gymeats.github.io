@@ -134,12 +134,30 @@ As **Classificações** têm três abas: *Dias* (o ranking clássico), *Pontos*
 (com os multiplicadores acima) e *Pratos* (melhores avaliados e o Rango da
 Vergonha). Um prato só entra nesses dois últimos depois de receber 2 notas.
 
-### Mapa
+### Onde a barra "Líder / Você" vai buscar o número
 
-O mapa do guia usa **Leaflet** (uma cópia fica em `assets/vendor/`, sem CDN de
-terceiros) com tiles do **OpenStreetMap** — ambos gratuitos e sem chave de API.
-Um lugar só aparece no mapa se quem postou tocou no ícone de alvo ao lado de
-"Onde foi?" pra marcar a localização.
+Ela mostra **pontos**, não dias. Dias ficavam parados quando alguém postava o
+segundo prato do mesmo dia, o que dava a impressão de que a barra estava
+travada. Logo abaixo dela tem um contador de pratos de hoje / do desafio, esse
+sim sobe a cada post.
+
+### Mapa e busca de endereço
+
+O mapa usa **Leaflet** (uma cópia fica em `assets/vendor/`, sem CDN de
+terceiros) com tiles do **OpenStreetMap**, e a busca de restaurante/endereço
+usa o **Nominatim** — tudo gratuito e sem chave de API.
+
+Ao postar, o campo "Onde foi?" abre uma tela onde dá pra:
+
+- buscar o restaurante ou endereço pelo nome;
+- tocar no mapa pra marcar o ponto exato;
+- ou usar a localização atual do celular.
+
+Isso resolve o caso de tirar a foto num lugar e postar depois, já em casa.
+
+O Nominatim pede no máximo uma consulta por segundo, então a busca só dispara
+700 ms depois que você para de digitar, e a partir de 3 letras. Para o uso de
+um grupo de amigos isso fica bem dentro da política.
 
 ---
 

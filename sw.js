@@ -3,7 +3,7 @@
 // e instantaneamente; os dados vêm do Firestore, que tem o próprio cache
 // em IndexedDB. Nunca cacheamos chamadas de rede do Firebase.
 
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL = `gymeats-shell-${VERSION}`;
 
 const SHELL_FILES = [
@@ -28,6 +28,7 @@ const SHELL_FILES = [
   "./src/js/views/profile.js",
   "./src/js/views/guide.js",
   "./src/js/views/recap.js",
+  "./src/js/views/place-picker.js",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",
   "./assets/vendor/leaflet.js",

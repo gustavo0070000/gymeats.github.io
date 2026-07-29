@@ -1,7 +1,10 @@
 import {
   h, esc, avatar, topbar, backBtn, tabbar, spinner, sheet, confirmSheet,
-  dayLabel, timeLabel, relative, shortDate, toast, toastError,
+  dayLabel, timeLabel, relative, shortDate, dayKey, toast, toastError,
 } from "../ui.js";
+import { formatPoints } from "../food.js";
+import { compress } from "../image.js";
+import { PHOTO } from "../config.js";
 import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
@@ -37,28 +40,62 @@ export function feedView({ cid }) {
 
   let challenge = null, members = [], posts = null, myChallenges = [];
 
+  /* O banner é desenhado uma vez só: reescrevê-lo a cada snapshot fazia a
+     imagem piscar toda vez que alguém postava. */
+  let bannerKey = null;
+
   const renderHeader = () => {
     if (!challenge) return;
     titleEl.textContent = challenge.name;
 
-    const rows = store.standings(members, "all", challenge);
+    const key = challenge.bannerThumb || "empty:" + challenge.name;
+    if (bannerKey !== key) {
+      bannerKey = key;
+      headerEl.innerHTML = `
+        ${challenge.bannerThumb
+          ? `<div class="banner"><img src="${esc(challenge.bannerThumb)}" alt=""></div>`
+          : `<div class="banner empty">${esc(challenge.name)}</div>`}
+        <div class="standings-strip" data-strip></div>
+        <div class="feed-counter" data-counter></div>`;
+    }
+
+    // O placar mostra PONTOS: cozinhar vale mais que comprar, e o bônus de
+    // sequência entra na conta. "Dias ativos" ficava parado quando alguém
+    // postava o segundo prato do mesmo dia.
+    const rows = store.standings(members, "all", challenge, "points");
     const leader = rows[0];
     const mine = rows.find((r) => r.uid === store.uid());
 
-    const cell = (person, count, label) => `
+    const cell = (person, value, label) => `
       <div class="standings-cell">
         ${avatar(person, "md")}
-        <div><div class="num">${count}</div><div class="lbl">${label}</div></div>
+        <div><div class="num">${formatPoints(value)}</div><div class="lbl">${label}</div></div>
       </div>`;
 
-    headerEl.innerHTML = `
-      ${challenge.bannerThumb
-        ? `<div class="banner"><img src="${esc(challenge.bannerThumb)}" alt=""></div>`
-        : `<div class="banner empty">${esc(challenge.name)}</div>`}
-      <div class="standings-strip">
-        ${leader ? cell(leader, leader.count, "Líder") : ""}
-        ${mine ? cell(mine, mine.count, "Você") : ""}
-      </div>`;
+    const strip = headerEl.querySelector("[data-strip]");
+    if (strip) {
+      strip.innerHTML = `
+        ${leader ? cell(leader, leader.points, "Líder") : ""}
+        ${mine ? cell(mine, mine.points, "Você") : ""}`;
+      strip.setAttribute("data-nav", `/c/${cid}/classificacoes`);
+    }
+    renderCounter();
+  };
+
+  /* Linha fina embaixo da barra: essa sim mexe a cada prato postado. */
+  const renderCounter = () => {
+    const el2 = headerEl.querySelector("[data-counter]");
+    if (!el2 || posts === null) return;
+    const today = dayKey();
+    const todayCount = posts.filter((p) => p.dayKey === today).length;
+    const mine = members.find((m) => m.uid === store.uid());
+    const total = members.reduce((s, m) => s + (m.total || 0), 0);
+
+    el2.innerHTML = `
+      <span>${todayCount} ${todayCount === 1 ? "prato hoje" : "pratos hoje"}</span>
+      <span>·</span>
+      <span>${total} no desafio</span>
+      ${mine ? `<span>·</span><span>🔥 ${store.memberStreak(mine)}</span>` : ""}`;
   };
 
   const renderPosts = () => {
@@ -108,7 +145,7 @@ export function feedView({ cid }) {
     renderHeader();
   });
   const unwatchMembers = store.watchMembers(cid, (m) => { members = m; renderHeader(); });
-  const unwatchPosts = store.watchFeed(cid, (p) => { posts = p; renderPosts(); });
+  const unwatchPosts = store.watchFeed(cid, (p) => { posts = p; renderPosts(); renderCounter(); });
   const unwatchMine = store.watchMyChallenges((list) => { myChallenges = list; });
 
   el.querySelector("[data-menu]").addEventListener("click", () => openMenu(myChallenges, cid));
@@ -279,7 +316,16 @@ export async function editChallengeView({ cid }) {
       ${topbar({ left: backBtn(`#/c/${cid}/detalhes`), title: "Editar desafio",
                  right: `<button class="topbar-action" data-save>Salvar</button>` })}
       <div class="screen-body no-tabbar">
-        <div class="gap-sm"></div>
+        <div class="compose-head" style="justify-content:center">
+          <div class="compose-photo" style="width:220px;aspect-ratio:16/9" data-banner>
+            ${challenge.bannerThumb
+              ? `<img src="${esc(challenge.bannerThumb)}" alt="">`
+              : `<div style="width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(135deg,#E0472F,#C43C26);color:#fff">${icon("image", 30)}</div>`}
+            <button class="edit-btn" data-pick>${icon("pencil", 20)}</button>
+          </div>
+        </div>
+        <div class="center hint-row" style="padding-top:18px">Toque no lápis pra trocar a capa</div>
+
         <div class="card">
           <label class="field">
             <span class="field-label">Nome</span>
@@ -301,17 +347,45 @@ export async function editChallengeView({ cid }) {
           </label></div>
         </div>
       </div>
+      <input type="file" accept="image/*" hidden data-file>
     </div>`);
+
+  /* ---- troca da capa ---- */
+  const fileInput = el.querySelector("[data-file]");
+  const bannerBox = el.querySelector("[data-banner]");
+  let newThumb = null, newFull = null;
+
+  el.querySelector("[data-pick]").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = "";
+    if (!file) return;
+    try {
+      newFull = await compress(file, { maxEdge: 1080, maxBytes: PHOTO.maxBytes });
+      newThumb = await compress(file, { maxEdge: 480, maxBytes: 60 * 1024 });
+      const old = bannerBox.querySelector("img, div:not(.edit-btn)");
+      const img = document.createElement("img");
+      img.src = newThumb;
+      old?.replaceWith(img);
+    } catch {
+      toastError("Não consegui usar essa imagem.");
+    }
+  });
 
   el.querySelector("[data-save]").addEventListener("click", async (e) => {
     e.currentTarget.disabled = true;
     try {
-      await store.updateChallenge(cid, {
+      const patch = {
         name: el.querySelector("[data-name]").value.trim() || challenge.name,
         description: el.querySelector("[data-desc]").value.trim(),
         startDate: new Date(el.querySelector("[data-start]").value + "T00:00:00"),
         endDate: new Date(el.querySelector("[data-end]").value + "T23:59:59"),
-      });
+      };
+      if (newThumb) {
+        patch.bannerThumb = newThumb;
+        patch.bannerPhotoId = await store.savePhoto(newFull, cid);
+      }
+      await store.updateChallenge(cid, patch);
       toast("Salvo!");
       navigate(`/c/${cid}/detalhes`);
     } catch {

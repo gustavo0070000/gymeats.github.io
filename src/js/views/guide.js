@@ -12,7 +12,7 @@ const LEAFLET_CSS = "./assets/vendor/leaflet.css";
 const LEAFLET_JS = "./assets/vendor/leaflet.js";
 
 let leafletPromise = null;
-function loadLeaflet() {
+export function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
   if (leafletPromise) return leafletPromise;
 
