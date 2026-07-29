@@ -26,6 +26,13 @@ disparar na mão: aba **Actions** → **Publicar regras do Firestore** →
 **Run workflow**. Usa o mesmo secret `FIREBASE_SERVICE_ACCOUNT` do deploy
 das funções.
 
+> **Antes da primeira execução**, a conta de serviço precisa do papel
+> **Administrador de regras do Firebase** (`roles/firebaserules.admin`) —
+> ela não vem com ele nem sendo Editor. Sem isso o deploy para com
+> `firebaserules.googleapis.com ... HTTP Error: 403`. Adicione em
+> [IAM do projeto](https://console.cloud.google.com/iam-admin/iam?project=ogusamaaisa)
+> → a conta do secret → **Editar** → **Adicionar outra função**. É uma vez só.
+
 Isso existe porque as regras ficarem atrás do repositório já custou caro: o
 app gravava o registro do aparelho, o Firestore recusava com
 `permission-denied`, e a tela não mostrava nada — ninguém recebia
