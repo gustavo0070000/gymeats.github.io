@@ -7,23 +7,14 @@ Ordem: passo 1 → 2 → 3 → 4. Leva uns 15 minutos.
 
 ---
 
-## 1. Gerar a chave do Web Push (2 min)
+## 1. Chave do Web Push — já está feito ✅
 
-No console do Firebase:
+A chave pública já está em [`src/js/config.js`](src/js/config.js). Ela é
+pública por design: identifica o projeto, não dá acesso a nada. A privada
+fica guardada com o Firebase e nunca sai de lá.
 
-**Configurações do projeto** (engrenagem) → aba **Cloud Messaging** →
-seção **Configuração da Web** → **Certificados push da Web** →
-**Gerar par de chaves**.
-
-Vai aparecer uma chave longa começando com `B...`. Copie e cole em
-[`src/js/config.js`](src/js/config.js), no lugar do `COLE_AQUI`:
-
-```js
-export const VAPID_PUBLIC_KEY = "BEl62iUYgUiv...";
-```
-
-Só a chave **pública** vai no código. A privada fica guardada com o
-Firebase e nunca sai de lá.
+Se um dia precisar gerar outra: **Configurações do projeto** → aba
+**Cloud Messaging** → **Certificados push da Web** → **Gerar par de chaves**.
 
 ---
 
@@ -38,18 +29,65 @@ aparelho.
 
 ---
 
-## 3. Subir as funções (10 min, uma vez só)
+## 3. Subir as funções
 
-Precisa do Node 20+ instalado. No terminal, dentro da pasta do projeto:
+Três caminhos. Os dois primeiros funcionam **inteiros pelo celular**.
+
+### a) Cloud Shell — o mais simples pelo celular
+
+O Google dá um terminal Linux no navegador, já logado na sua conta.
+Não precisa instalar nada nem configurar credencial.
+
+1. Abra **shell.cloud.google.com** no navegador do celular
+2. Espere a máquina subir e digite:
 
 ```bash
-npm install -g firebase-tools     # só na primeira vez
-firebase login                    # abre o navegador pra você entrar
-firebase deploy --only functions
+git clone https://github.com/gustavo0070000/gymeats.github.io
+cd gymeats.github.io
+npm install -g firebase-tools
+firebase deploy --only functions --project ogusamaaisa
 ```
 
-Na primeira vez o Firebase pede pra ativar algumas APIs (Cloud Functions,
-Cloud Build, Artifact Registry, Cloud Scheduler). Responda **sim** a todas.
+Na primeira vez ele pede pra ativar algumas APIs (Cloud Functions,
+Cloud Build, Artifact Registry, Cloud Scheduler) — responda **sim** a todas.
+
+Digitar em terminal no celular é chato, mas são quatro linhas e só
+acontece uma vez. Dá pra colar tudo de uma vez.
+
+### b) Botão no GitHub — chato uma vez, fácil pra sempre
+
+Depois de configurado, publicar vira um toque na aba **Actions**.
+A configuração é uma vez só:
+
+1. **Firebase Console** → engrenagem → **Configurações do projeto** →
+   aba **Contas de serviço** → **Gerar nova chave privada**.
+   Baixa um arquivo `.json` — funciona no celular.
+
+2. Essa conta precisa de permissão pra publicar. No
+   **console.cloud.google.com** → **IAM e administrador** → **IAM**,
+   ache a conta `firebase-adminsdk-...` e adicione estes papéis:
+
+   - Administrador do Cloud Functions
+   - Usuário da conta de serviço
+   - Editor do Cloud Scheduler
+   - Leitor do Artifact Registry
+
+3. **GitHub** → repositório → **Settings** → **Secrets and variables** →
+   **Actions** → **New repository secret**
+   - Nome: `FIREBASE_SERVICE_ACCOUNT`
+   - Valor: o conteúdo inteiro do `.json`
+
+4. Aba **Actions** → **Publicar funções** → **Run workflow**
+
+Daí em diante, toda mudança em `functions/` publica sozinha.
+
+### c) Do computador, quando tiver um
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase deploy --only functions
+```
 
 No fim aparece a lista das seis funções:
 

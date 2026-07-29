@@ -1,0 +1,45 @@
+name: Publicar funções
+
+# Roda pelo botão "Run workflow" na aba Actions — dá pra disparar do
+# celular, sem precisar de terminal. Também roda sozinho quando algo
+# dentro de functions/ muda no main.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "functions/**"
+      - ".github/workflows/deploy-functions.yml"
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar dependências das funções
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+
+      - name: Instalar o Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Gravar a credencial
+        # O secret é o JSON inteiro da conta de serviço. Ele fica só na
+        # memória do runner e some quando o job acaba.
+        run: |
+          printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$RUNNER_TEMP/sa.json"
+          test -s "$RUNNER_TEMP/sa.json" || { echo "::error::Secret FIREBASE_SERVICE_ACCOUNT vazio ou ausente"; exit 1; }
+
+      - name: Publicar
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: firebase deploy --only functions --project ogusamaaisa --non-interactive
+
+      - name: Apagar a credencial
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
