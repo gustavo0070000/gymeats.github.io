@@ -11,6 +11,7 @@
 
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -25,26 +26,47 @@ const fcm = getMessaging();
 const FUSO = "America/Sao_Paulo";
 const PADRAO = { posts: true, comments: true, ratings: true, recaps: true };
 
+// Teto do campo `data` de uma mensagem do FCM.
+const LIMITE_FCM = 4096;
+
 /* ============================================================
    Envio
    ============================================================ */
 
-/** Tokens de um usuário, junto com a preferência dele. */
+/**
+ * Tokens de um usuário, junto com a preferência dele.
+ * Devolve `{ tokens, semPref, semAparelho }` — a lista vazia sozinha não
+ * dizia se a pessoa desligou o aviso ou se nunca registrou o aparelho, e essa
+ * diferença é exatamente o que faltava pra entender "nenhum destinatário".
+ */
 async function destinatario(uid, tipo) {
   const perfil = await db.doc(`users/${uid}`).get();
   const prefs = { ...PADRAO, ...(perfil.data()?.notify || {}) };
-  if (!prefs[tipo]) return [];
+  if (!prefs[tipo]) return { tokens: [], semPref: 1, semAparelho: 0 };
 
-  const tokens = await db.collection(`users/${uid}/pushTokens`).get();
-  return tokens.docs
+  const docs = await db.collection(`users/${uid}/pushTokens`).get();
+  const tokens = docs.docs
     .map((d) => ({ uid, docId: d.id, token: d.data().token }))
     .filter((t) => t.token);
+  return { tokens, semPref: 0, semAparelho: tokens.length ? 0 : 1 };
 }
 
 /** Junta os tokens de várias pessoas, respeitando as preferências. */
 async function destinatarios(uids, tipo) {
-  const listas = await Promise.all(uids.map((uid) => destinatario(uid, tipo)));
-  return listas.flat();
+  const partes = await Promise.all(uids.map((uid) => destinatario(uid, tipo)));
+  return partes.reduce((acc, p) => ({
+    tokens: acc.tokens.concat(p.tokens),
+    semPref: acc.semPref + p.semPref,
+    semAparelho: acc.semAparelho + p.semAparelho,
+  }), { tokens: [], semPref: 0, semAparelho: 0 });
+}
+
+/** Frase curta pro log explicar por que não foi pra ninguém. */
+function motivoVazio({ semPref, semAparelho }) {
+  if (semAparelho && semPref) return `${semAparelho} sem aparelho registrado, ${semPref} com o aviso desligado`;
+  if (semAparelho) return `${semAparelho} ${semAparelho === 1 ? "pessoa" : "pessoas"} sem aparelho registrado`;
+  if (semPref) return `${semPref} ${semPref === 1 ? "pessoa" : "pessoas"} com esse aviso desligado`;
+  return "ninguém pra avisar";
 }
 
 /**
@@ -55,12 +77,28 @@ async function destinatarios(uids, tipo) {
 async function enviar(alvos, payload, registro = null) {
   if (!alvos.length) {
     if (registro) await anotar({ ...registro, payload, enviadas: 0, alvos: 0 });
-    return 0;
+    console.warn(`nada enviado (${registro?.tipo || "?"}): ${registro?.motivo || "sem alvos"}`);
+    return { enviadas: 0, alvos: 0, limpos: 0, erros: [] };
   }
 
+  // O campo `data` do FCM tem teto de 4096 bytes no total. A miniatura em
+  // base64 sozinha passa disso, e o FCM devolvia invalid-argument — que era
+  // lido como token morto e apagava o registro de quem ia receber.
   const dados = {};
   for (const [k, v] of Object.entries(payload)) {
     if (v !== undefined && v !== null && v !== "") dados[k] = String(v);
+  }
+
+  const tamanho = (o) => Object.entries(o)
+    .reduce((n, [k, v]) => n + Buffer.byteLength(k) + Buffer.byteLength(v), 0);
+
+  if (tamanho(dados) > LIMITE_FCM) {
+    delete dados.image;                       // a imagem é o que quase sempre estoura
+    if (tamanho(dados) > LIMITE_FCM) {
+      dados.body = (dados.body || "").slice(0, 300);
+      delete dados.tag;
+    }
+    console.warn(`payload acima de ${LIMITE_FCM} bytes; enviando sem imagem`);
   }
 
   const resultado = await fcm.sendEachForMulticast({
@@ -72,13 +110,20 @@ async function enviar(alvos, payload, registro = null) {
     },
   });
 
+  // Só some com o registro quando o Firebase diz que o token não vale mais.
+  // invalid-argument ficava aqui e apagava aparelho bom por erro de payload.
+  const TOKEN_MORTO = /registration-token-not-registered|invalid-registration-token|mismatched-credential/;
   const mortos = [];
+  const erros = [];
   resultado.responses.forEach((r, i) => {
-    const codigo = r.error?.code || "";
-    if (!r.success && /registration-token-not-registered|invalid-argument/.test(codigo)) {
-      mortos.push(alvos[i]);
-    }
+    if (r.success) return;
+    const codigo = r.error?.code || "erro-sem-codigo";
+    console.error(`falha no envio: ${codigo} — ${r.error?.message || ""}`);
+    if (!erros.includes(codigo)) erros.push(codigo);
+    if (TOKEN_MORTO.test(codigo)) mortos.push(alvos[i]);
   });
+  // Token morto sai da lista: na próxima abertura o app registra um novo
+  // sozinho (ensureRegistered), então o aparelho se conserta sem ninguém mexer.
   await Promise.all(mortos.map((m) =>
     db.doc(`users/${m.uid}/pushTokens/${m.docId}`).delete().catch(() => {})));
 
@@ -92,9 +137,10 @@ async function enviar(alvos, payload, registro = null) {
       enviadas: resultado.successCount,
       falhas: alvos.length - resultado.successCount,
       limpos: mortos.length,
+      erro: erros.join(", "),
     });
   }
-  return resultado.successCount;
+  return { enviadas: resultado.successCount, alvos: alvos.length, limpos: mortos.length, erros };
 }
 
 /**
@@ -103,7 +149,7 @@ async function enviar(alvos, payload, registro = null) {
  * de quem enxerga o desafio vale aqui. A imagem não entra: é base64 e só
  * incharia o documento.
  */
-async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0 }) {
+async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0, motivo = "", erro = "" }) {
   if (!cid) return;
   try {
     await db.collection(`challenges/${cid}/notifications`).add({
@@ -111,7 +157,8 @@ async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0,
       title: payload.title || "",
       body: (payload.body || "").slice(0, 200),
       url: payload.url || "",
-      alvos, enviadas, falhas, limpos,
+      alvos, enviadas, falhas, limpos, erro,
+      motivo: alvos ? "" : motivo,
       at: FieldValue.serverTimestamp(),
     });
   } catch (err) {
@@ -121,10 +168,14 @@ async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0,
 
 const primeiroNome = (nome) => String(nome || "Alguém").trim().split(/\s+/)[0];
 
-/** Miniatura do prato como imagem da notificação (já vem em base64 no post). */
+/**
+ * Imagem da notificação. Usa a micro-miniatura gravada junto do post, que é
+ * pequena de propósito pra caber no orçamento de 4 KB do FCM. A miniatura do
+ * feed (~5 KB) não serve aqui — sozinha já estoura a mensagem inteira.
+ */
 const imagemDoPrato = (post) =>
-  (typeof post?.thumb === "string" && post.thumb.startsWith("data:") && post.thumb.length < 60000)
-    ? post.thumb
+  (typeof post?.micro === "string" && post.micro.startsWith("data:") && post.micro.length <= 2800)
+    ? post.micro
     : "";
 
 async function membrosDoDesafio(cid) {
@@ -145,15 +196,15 @@ exports.aoPostarPrato = onDocumentCreated(
 
     const { challenge, uids } = await membrosDoDesafio(cid);
     const outros = uids.filter((u) => u !== post.uid);
-    const alvos = await destinatarios(outros, "posts");
+    const quem = await destinatarios(outros, "posts");
 
-    await enviar(alvos, {
+    await enviar(quem.tokens, {
       title: `${primeiroNome(post.authorName)} postou um prato`,
       body: post.title || challenge.name || "Novo prato no desafio",
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    }, { cid, tipo: "posts" });
+    }, { cid, tipo: "posts", motivo: motivoVazio(quem) });
   });
 
 /* ============================================================
@@ -171,14 +222,14 @@ exports.aoComentar = onDocumentCreated(
     const post = postSnap.data();
     if (!post || post.uid === comentario.uid) return;  // comentário no próprio prato
 
-    const alvos = await destinatario(post.uid, "comments");
-    await enviar(alvos, {
+    const quem = await destinatario(post.uid, "comments");
+    await enviar(quem.tokens, {
       title: `${primeiroNome(comentario.name)} comentou no seu prato`,
       body: comentario.text || "",
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    }, { cid, tipo: "comments" });
+    }, { cid, tipo: "comments", motivo: motivoVazio(quem) });
   });
 
 /* ============================================================
@@ -204,15 +255,15 @@ exports.aoDarNota = onDocumentUpdated(
     const nota = notasDepois[quem];
 
     const membro = await db.doc(`challenges/${cid}/members/${quem}`).get();
-    const alvos = await destinatario(depois.uid, "ratings");
+    const dono = await destinatario(depois.uid, "ratings");
 
-    await enviar(alvos, {
+    await enviar(dono.tokens, {
       title: `${primeiroNome(membro.data()?.name)} deu ${nota}/10 no seu prato`,
       body: depois.title || "",
       image: imagemDoPrato(depois),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    }, { cid, tipo: "ratings" });
+    }, { cid, tipo: "ratings", motivo: motivoVazio(dono) });
   });
 
 /* ============================================================
@@ -265,14 +316,14 @@ async function mandarRecap(periodo, de, ate, titulo) {
       ? ` · 2º ${primeiroNome(tabela[1].name)} com ${tabela[1].pontos}`
       : "";
 
-    const alvos = await destinatarios(challenge.memberUids || [], "recaps");
-    await enviar(alvos, {
+    const galera = await destinatarios(challenge.memberUids || [], "recaps");
+    await enviar(galera.tokens, {
       title: `${titulo} — ${quem}`,
       body: `${campeao.pontos} ${campeao.pontos === 1 ? "ponto" : "pontos"} em `
         + `${campeao.dias} ${campeao.dias === 1 ? "dia" : "dias"}${segundo}`,
       tag: `recap-${periodo}-${cid}`,
       url: `/#/c/${cid}/recap`,
-    }, { cid, tipo: "recaps" });
+    }, { cid, tipo: "recaps", motivo: motivoVazio(galera) });
   }
 }
 
@@ -304,3 +355,74 @@ exports.recapAnual = onSchedule(
     const ano = hoje.getFullYear() - 1;
     await mandarRecap("ano", `${ano}-01-01`, `${ano}-12-31`, `Recap de ${ano}`);
   });
+
+
+/* ============================================================
+   Teste
+   ============================================================ */
+
+/** Traduz o código do FCM pra uma frase que diz o que fazer. */
+function explicarErro(erros = [], limpos = 0) {
+  const codigo = erros.join(" ");
+  if (/registration-token-not-registered|invalid-registration-token/.test(codigo)) {
+    return "O registro deste aparelho tinha vencido — acabei de apagar o antigo. "
+      + "Feche e abra o app: ele registra de novo sozinho, aí é só testar outra vez.";
+  }
+  if (/mismatched-credential|third-party-auth/.test(codigo)) {
+    return "O registro deste aparelho foi feito com outra chave do Web Push. "
+      + "Toque em \"Desligar neste aparelho\" e ligue de novo.";
+  }
+  if (/invalid-argument/.test(codigo)) {
+    return "O Firebase recusou o conteúdo da mensagem (invalid-argument). "
+      + "Isso é bug do app, não do seu aparelho — me avise.";
+  }
+  if (/quota|unavailable|internal/.test(codigo)) {
+    return "O Firebase está fora do ar ou recusou por limite. Tente de novo daqui a pouco.";
+  }
+  if (limpos) {
+    return `O registro estava vencido e foi apagado (${codigo}). Feche e abra o app pra registrar de novo.`;
+  }
+  return `O Firebase recusou o envio: ${codigo || "sem código"}.`;
+}
+
+/**
+ * Dispara uma notificação só pra quem chamou. É o jeito de separar
+ * "o gatilho não rodou" de "o aparelho não está registrado": aqui não
+ * há gatilho nenhum no meio do caminho.
+ */
+exports.testarNotificacao = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Entre na sua conta.");
+
+  const tokens = await db.collection(`users/${uid}/pushTokens`).get();
+  if (tokens.empty) {
+    return {
+      ok: false,
+      motivo: "sem-token",
+      detalhe: "Nenhum aparelho registrado no servidor. Desligue e ligue as "
+        + "notificações de novo — provavelmente o registro não chegou a ser gravado.",
+    };
+  }
+
+  const alvos = tokens.docs
+    .map((d) => ({ uid, docId: d.id, token: d.data().token }))
+    .filter((t) => t.token);
+
+  const r = await enviar(alvos, {
+    title: "Deu certo! 🎉",
+    body: "As notificações do GymEats estão funcionando neste aparelho.",
+    url: "/#/notificacoes",
+  });
+
+  return {
+    ok: r.enviadas > 0,
+    aparelhos: alvos.length,
+    enviadas: r.enviadas,
+    limpos: r.limpos,
+    erros: r.erros,
+    motivo: r.enviadas > 0 ? "" : "falha-envio",
+    // O código do FCM vem junto: mandar a pessoa "olhar o log da função" era
+    // inútil pra quem não é dono do projeto.
+    detalhe: r.enviadas > 0 ? "" : explicarErro(r.erros, r.limpos),
+  };
+});

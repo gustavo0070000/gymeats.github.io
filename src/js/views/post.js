@@ -5,7 +5,7 @@ import {
 import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
-import { compress, thumbnail } from "../image.js";
+import { compress, thumbnail, microThumbnail } from "../image.js";
 import { PHOTO } from "../config.js";
 import { pickPlace } from "./place-picker.js";
 
@@ -314,9 +314,10 @@ export function composeView({ cid }) {
       btn.disabled = true;
       btn.textContent = "Enviando…";
       try {
-        const [photo, thumb] = await Promise.all([
+        const [photo, thumb, micro] = await Promise.all([
           compress(capturedFile, { maxEdge: PHOTO.maxEdge, maxBytes: PHOTO.maxBytes }),
           thumbnail(capturedFile),
+          microThumbnail(capturedFile),   // é esta que vai na notificação
         ]);
         const day = campoDia.value || dayKey(new Date());
         const time = campoHora.value || "12:00";
@@ -332,7 +333,7 @@ export function composeView({ cid }) {
           place,
           coords,
           price: parseFloat(el.querySelector("[data-price]").value),
-          photo, thumb,
+          photo, thumb, micro,
           at: new Date(`${day}T${time}:00`),
         });
         toast("Prato postado!");

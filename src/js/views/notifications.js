@@ -4,6 +4,7 @@ import * as push from "../push.js";
 import * as store from "../store.js";
 
 const MOTIVOS = {
+  "regras": "As regras do Firestore não deixaram gravar o registro deste aparelho. Publique o firestore.rules atualizado e tente de novo.",
   "sem-chave": "Falta cadastrar a chave do Web Push no projeto. Veja o README.",
   "sem-suporte": "Este navegador não aceita notificações. No iPhone, precisa ser iOS 16.4 ou mais novo e com o app instalado na tela de início.",
   "negada": "Você bloqueou as notificações. Libere nas configurações do site no navegador.",
@@ -21,14 +22,17 @@ export function notificationsView() {
 
   const body = el.querySelector("[data-body]");
   let prefs = { ...push.DEFAULT_PREFS };
-  let ligado = false;
+  let estado = null;
   let unwatch = null;
 
   async function desenhar() {
-    const permissao = push.permission();
-    const suportado = await push.supported();
+    const permissao = estado?.permissao ?? push.permission();
+    const suportado = estado?.suportado ?? await push.supported();
     const naTelaInicial = matchMedia("(display-mode: standalone)").matches;
     const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    // "Ligado" agora quer dizer registrado NO SERVIDOR, não só no navegador.
+    const ligado = !!estado?.salvo;
+    const tokenSemRegistro = !!estado?.token && !estado?.salvo;
 
     body.innerHTML = `
       <div class="gap-sm"></div>
@@ -37,15 +41,41 @@ export function notificationsView() {
         <div class="notif-state">${ligado ? "Notificações ligadas" : "Notificações desligadas"}</div>
         <div class="notif-sub">
           ${ligado
-            ? "Este aparelho vai receber os avisos que estiverem marcados abaixo."
-            : "Ligue pra saber quando a galera postar, comentar ou dar nota."}
+            ? "Este aparelho está registrado no servidor e vai receber os avisos marcados abaixo."
+            : tokenSemRegistro
+              ? "O navegador liberou, mas o registro não chegou ao servidor — por isso nada chega. Toque abaixo pra registrar de novo."
+              : "Ligue pra saber quando a galera postar, comentar ou dar nota."}
         </div>
         <div class="pad" style="width:100%;padding-top:14px">
           ${ligado
-            ? `<button class="btn btn-white" data-off>Desligar neste aparelho</button>`
-            : `<button class="btn btn-primary" data-on>${icon("bell", 20)} Ligar notificações</button>`}
+            ? `<button class="btn btn-primary" data-test>${icon("bell", 20)} Enviar notificação de teste</button>
+               <div class="gap-sm"></div>
+               <button class="btn btn-white" data-off>Desligar neste aparelho</button>`
+            : `<button class="btn btn-primary" data-on>${icon("bell", 20)} ${tokenSemRegistro ? "Registrar este aparelho" : "Ligar notificações"}</button>`}
         </div>
       </div>
+
+      ${estado ? `
+        <div class="section-label left">Situação deste aparelho</div>
+        <div class="card list-card">
+          ${[
+            ["Navegador aceita notificação", estado.suportado],
+            ["Permissão concedida", estado.permissao === "granted"],
+            ["Chave do Web Push", estado.comChave],
+            ["Registro no navegador", estado.token],
+            ["Registro salvo no servidor", estado.salvo],
+          ].map(([texto, ok]) => `
+            <div class="list-row">
+              <span class="label">${esc(texto)}</span>
+              <span class="value" style="color:${ok ? "#2E7D32" : "var(--red)"}">${ok ? "ok" : "não"}</span>
+            </div>`).join("")}
+          ${estado.erro ? `<div class="list-row"><span class="label">Erro</span>
+            <span class="value">${esc(estado.erro)}</span></div>` : ""}
+        </div>
+        <div class="pad hint-row">
+          O que vale é a última linha: sem o registro no servidor, ninguém tem
+          pra onde mandar, mesmo com tudo o resto verde.
+        </div>` : ""}
 
       ${!suportado ? `<div class="notice">
         Este navegador não aceita notificações.
@@ -87,23 +117,28 @@ export function notificationsView() {
       btn.disabled = true;
       btn.textContent = "Ligando…";
       const r = await push.enable();
-      if (r.ok) {
-        ligado = true;
-        toast("Pronto! Este aparelho vai receber notificações.");
-        desenhar();
-      } else {
-        btn.disabled = false;
-        btn.innerHTML = `${icon("bell", 20)} Ligar notificações`;
-        toastError(MOTIVOS[r.reason] || "Não deu pra ligar.");
-        desenhar();
-      }
+      estado = await push.diagnostico();
+      if (r.ok) toast("Pronto! Agora mande um teste pra confirmar.");
+      else toastError(MOTIVOS[r.reason] || "Não deu pra ligar.");
+      desenhar();
     });
 
     body.querySelector("[data-off]")?.addEventListener("click", async () => {
       await push.disable();
-      ligado = false;
+      estado = await push.diagnostico();
       toast("Este aparelho não recebe mais notificações.");
       desenhar();
+    });
+
+    body.querySelector("[data-test]")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Enviando…";
+      const r = await push.testar();
+      btn.disabled = false;
+      btn.innerHTML = `${icon("bell", 20)} Enviar notificação de teste`;
+      if (r?.ok) toast(`Enviado pra ${r.enviadas} ${r.enviadas === 1 ? "aparelho" : "aparelhos"}. Deve chegar agora.`);
+      else toastError(r?.detalhe || "O teste não saiu.");
     });
 
     body.querySelector("[data-prefs]").addEventListener("click", async (e) => {
@@ -122,7 +157,7 @@ export function notificationsView() {
 
   unwatch = store.watchUser(async (user) => {
     if (user?.notify) prefs = { ...push.DEFAULT_PREFS, ...user.notify };
-    ligado = await push.registered();
+    estado = await push.diagnostico();
     desenhar();
   });
 

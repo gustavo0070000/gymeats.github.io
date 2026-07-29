@@ -10,6 +10,9 @@ import {
   arrayUnion, arrayRemove, increment, writeBatch, runTransaction, deleteField,
 } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 
+import { getFunctions, httpsCallable }
+  from "https://www.gstatic.com/firebasejs/12.4.0/firebase-functions.js";
+
 import { firebaseConfig, isConfigured } from "./config.js";
 
 export const configured = isConfigured();
@@ -25,6 +28,10 @@ export const db = initializeFirestore(app, {
 });
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+// As funções vivem em São Paulo; sem a região o SDK procura em us-central1.
+export const functions = getFunctions(app, "southamerica-east1");
+export const callable = (nome) => httpsCallable(functions, nome);
 
 /* ---------- Login ---------- */
 
