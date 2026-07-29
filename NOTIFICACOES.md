@@ -74,8 +74,13 @@ A configuração é uma vez só:
 
    - Administrador do Cloud Functions
    - Usuário da conta de serviço
-   - Editor do Cloud Scheduler
+   - **Administrador do Cloud Scheduler** (`roles/cloudscheduler.admin`)
    - Leitor do Artifact Registry
+
+   O de Scheduler precisa ser **Administrador**, não Editor: publicar um
+   recap exige `cloudscheduler.jobs.update`, que só vem no papel de
+   administrador. Com o papel errado, as três funções de gatilho publicam
+   normalmente e só os recaps falham com HTTP 403.
 
 3. **GitHub** → repositório → **Settings** → **Secrets and variables** →
    **Actions** → **New repository secret**
