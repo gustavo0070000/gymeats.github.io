@@ -4,6 +4,20 @@ Um clone do **GymRats**, mas pra comida. Todo dia cada pessoa do grupo posta a f
 de um prato; quem posta mais dias lidera a tabela. Tem feed, comentários,
 reações, bate-papo, calendário e placar semanal.
 
+E, além do que o GymRats faz, tem o que só faz sentido com comida:
+
+| | |
+|---|---|
+| ⭐ **Nota de 1 a 10** | a galera avalia cada prato; sai um ranking de qualidade separado do de consistência |
+| 🌍 **Passaporte gastronômico** | 24 cozinhas pra desbloquear, uma por vez, na primeira vez que você posta cada uma |
+| 👨‍🍳 **Cozinhou vs. comprou** | cozinhar vale 2 pontos, comprar vale 1 |
+| 🔥 **Bônus de sequência** | a partir de 7 dias seguidos, tudo vale 1,5x |
+| 🃏 **Vale-faltas** | 2 coringas por pessoa pra salvar a sequência de um dia perdido |
+| 💀 **Rango da Vergonha** | pódio invertido pros pratos que fecharam abaixo de 6 |
+| 💸 **Palpite de preço** | quem posta esconde quanto custou; os outros chutam antes de ver |
+| 📍 **Guia do grupo** | os lugares onde vocês comeram, com nota média e mapa |
+| 📊 **Recap** | resumo de semana / mês / ano / desafio inteiro, pronto pra mandar no zap |
+
 É um **PWA**: roda no navegador e instala como app no celular.
 Roda inteiro no **free tier** — GitHub Pages + Firebase plano Spark.
 **Nenhum cartão de crédito é necessário.**
@@ -105,9 +119,27 @@ Instalado, ele abre em tela cheia, sem barra de navegador, com ícone próprio.
 5. Todo dia, toque no **+**, tire a foto do prato, dê um título e publique.
 6. **Classificações** mostra quem tem mais dias ativos na semana / mês / ano.
 
-Cada **dia** com pelo menos um post vale 1 ponto — postar cinco vezes no mesmo
-dia continua valendo 1. Empates dividem a mesma posição, igual no GymRats.
-Quem termina a semana em primeiro ganha uma "vitória semanal".
+### Como pontua
+
+- Prato **comprado** vale 1 ponto, prato **feito em casa** vale 2.
+- A partir de **7 dias seguidos**, tudo passa a valer **1,5x**.
+- Os pontos são **por dia**, não por post: postar cinco vezes no mesmo dia não
+  acumula, mas o dia fica valendo o melhor prato daquele dia.
+- Cada pessoa tem **2 vale-faltas** por desafio pra cobrir um dia perdido sem
+  quebrar a sequência.
+- Empates dividem a mesma posição, igual no GymRats. Quem termina a semana em
+  primeiro ganha uma "vitória semanal".
+
+As **Classificações** têm três abas: *Dias* (o ranking clássico), *Pontos*
+(com os multiplicadores acima) e *Pratos* (melhores avaliados e o Rango da
+Vergonha). Um prato só entra nesses dois últimos depois de receber 2 notas.
+
+### Mapa
+
+O mapa do guia usa **Leaflet** (uma cópia fica em `assets/vendor/`, sem CDN de
+terceiros) com tiles do **OpenStreetMap** — ambos gratuitos e sem chave de API.
+Um lugar só aparece no mapa se quem postou tocou no ícone de alvo ao lado de
+"Onde foi?" pra marcar a localização.
 
 ---
 
@@ -119,9 +151,11 @@ manifest.webmanifest       metadados do PWA
 sw.js                      service worker (offline + instalação)
 firestore.rules            regras de segurança do banco
 src/css/app.css            design system inteiro
+assets/vendor/             Leaflet (mapa), servido do próprio repo
 src/js/
   config.js                chaves do Firebase e limites de compressão
   firebase.js              inicialização do SDK e login
+  food.js                  cozinhas, refeições e as regras de pontuação
   store.js                 toda a camada de dados e o cálculo do placar
   router.js                roteador por hash
   image.js                 compressão de imagem no navegador

@@ -8,14 +8,10 @@ import { navigate } from "../router.js";
 import { compress, thumbnail } from "../image.js";
 import { PHOTO } from "../config.js";
 
-const MEALS = [
-  { id: "cafe", label: "Café", emoji: "☕" },
-  { id: "almoco", label: "Almoço", emoji: "🍽️" },
-  { id: "lanche", label: "Lanche", emoji: "🥪" },
-  { id: "janta", label: "Janta", emoji: "🍝" },
-  { id: "sobremesa", label: "Sobremesa", emoji: "🍰" },
-];
-const mealById = (id) => MEALS.find((m) => m.id === id);
+import {
+  MEALS, mealById, CUISINES, cuisineById,
+  formatPoints, formatMoney, formatRating, guessWinner, basePoints,
+} from "../food.js";
 
 const EMOJIS = ["🔥", "😍", "🤤", "👏", "😂", "🤮", "💀", "🐐"];
 
@@ -194,18 +190,44 @@ export function composeView({ cid }) {
             </div></div>
           </div>
 
+          <div class="card">
+            <div class="toggle-row" data-homemade-row>
+              <button class="toggle-opt active" data-homemade="0">🛒 Comprei<span>1 ponto</span></button>
+              <button class="toggle-opt" data-homemade="1">👨‍🍳 Cozinhei<span>2 pontos</span></button>
+            </div>
+          </div>
+
           <div class="card"><div class="field-inline">
             <span class="ico">${icon("pin", 22)}</span>
             <div class="field-body">
               <input data-place placeholder="Onde foi? (opcional)" maxlength="60"
                      style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
             </div>
+            <button class="geo-btn" data-geo title="Usar minha localização">${icon("target", 20)}</button>
           </div></div>
+
+          <div class="card"><div class="field-inline">
+            <span class="ico" style="font-size:20px">💸</span>
+            <div class="field-body">
+              <span class="field-label">Quanto custou? (opcional)</span>
+              <input data-price type="number" inputmode="decimal" min="0" step="0.01" placeholder="R$ —"
+                     style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
+            </div>
+          </div>
+          <div class="hint-row">Fica escondido: a galera chuta o preço antes de ver.</div>
+          </div>
 
           <div class="card">
             <div class="field-label" style="padding:14px 16px 0">Refeição</div>
             <div class="chip-wrap" data-meals>
               ${MEALS.map((m) => `<button class="chip" data-meal="${m.id}">${m.emoji} ${m.label}</button>`).join("")}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="field-label" style="padding:14px 16px 0">Cozinha · carimba o passaporte</div>
+            <div class="chip-wrap scroll" data-cuisines>
+              ${CUISINES.map((c) => `<button class="chip" data-cuisine="${c.id}">${c.emoji} ${c.label}</button>`).join("")}
             </div>
           </div>
 
@@ -223,13 +245,45 @@ export function composeView({ cid }) {
       });
     });
 
-    let meal = "";
-    el.querySelector("[data-meals]").addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-meal]");
+    let meal = "", cuisine = "", homemade = false, coords = null;
+
+    const chipGroup = (container, attr, get, set) => {
+      el.querySelector(container).addEventListener("click", (e) => {
+        const btn = e.target.closest(`[data-${attr}]`);
+        if (!btn) return;
+        set(btn.dataset[attr] === get() ? "" : btn.dataset[attr]);
+        el.querySelectorAll(`[data-${attr}]`).forEach((b) =>
+          b.classList.toggle("active", b.dataset[attr] === get()));
+      });
+    };
+    chipGroup("[data-meals]", "meal", () => meal, (v) => (meal = v));
+    chipGroup("[data-cuisines]", "cuisine", () => cuisine, (v) => (cuisine = v));
+
+    el.querySelector("[data-homemade-row]").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-homemade]");
       if (!btn) return;
-      meal = btn.dataset.meal === meal ? "" : btn.dataset.meal;
-      el.querySelectorAll("[data-meal]").forEach((b) =>
-        b.classList.toggle("active", b.dataset.meal === meal));
+      homemade = btn.dataset.homemade === "1";
+      el.querySelectorAll("[data-homemade]").forEach((b) =>
+        b.classList.toggle("active", (b.dataset.homemade === "1") === homemade));
+    });
+
+    el.querySelector("[data-geo]").addEventListener("click", (e) => {
+      const btn = e.currentTarget;
+      if (!navigator.geolocation) return toastError("Seu navegador não tem GPS.");
+      btn.classList.add("busy");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          coords = {
+            lat: Number(pos.coords.latitude.toFixed(6)),
+            lng: Number(pos.coords.longitude.toFixed(6)),
+          };
+          btn.classList.remove("busy");
+          btn.classList.add("on");
+          toast("Localização marcada — vai pro mapa do guia.");
+        },
+        () => { btn.classList.remove("busy"); toastError("Não consegui pegar sua localização."); },
+        { enableHighAccuracy: true, timeout: 8000 },
+      );
     });
 
     el.querySelector("[data-back]").addEventListener("click", () => showCamera());
@@ -254,7 +308,11 @@ export function composeView({ cid }) {
           title,
           description: el.querySelector("[data-desc]").value.trim(),
           mealType: meal,
+          cuisine,
+          homemade,
           place: el.querySelector("[data-place]").value.trim(),
+          coords,
+          price: parseFloat(el.querySelector("[data-price]").value),
           photo, thumb,
           at: new Date(`${day}T${time}:00`),
         });
@@ -305,7 +363,8 @@ export function postView({ cid, pid }) {
   const input = el.querySelector("[data-input]");
   const sendBtn = el.querySelector("[data-send]");
 
-  let post = null, comments = [], fullPhoto = null, drawn = false;
+  let post = null, comments = [], fullPhoto = null, drawn = false, members = [];
+  const nameOf = (u) => members.find((m) => m.uid === u)?.name || "alguém";
 
   el.querySelector("[data-back]").addEventListener("click", () => navigate(`/c/${cid}`));
   el.querySelector("[data-my-avatar]").innerHTML = avatar(store.me(), "md");
@@ -326,10 +385,81 @@ export function postView({ cid, pid }) {
       : `<div class="empty" style="padding:26px 30px">Ninguém comentou ainda. Solta o verbo.</div>`;
   };
 
+  /* Nota de 1 a 10: só quem não é o autor vota. */
+  const ratingBlock = () => {
+    const isMine = post.uid === store.uid();
+    const mine = (post.ratings || {})[store.uid()];
+    const avg = post.ratingAvg;
+    const count = post.ratingCount || 0;
+
+    const header = `
+      <div class="rate-head">
+        <div>
+          <div class="rate-avg">${formatRating(avg)}<span>/10</span></div>
+          <div class="rate-count">${count === 0 ? "sem notas ainda"
+            : `${count} ${count === 1 ? "nota" : "notas"}`}</div>
+        </div>
+        ${isMine ? `<div class="rate-hint">Prato seu — quem dá nota é a galera</div>` : ""}
+      </div>`;
+
+    if (isMine) return `<div class="card rate-card">${header}</div>`;
+
+    return `
+      <div class="card rate-card">
+        ${header}
+        <div class="rate-scale" data-rate>
+          ${Array.from({ length: 10 }, (_, i) => i + 1).map((n) => `
+            <button class="rate-dot ${mine === n ? "on" : ""} ${mine && n <= mine ? "under" : ""}"
+                    data-score="${n}">${n}</button>`).join("")}
+        </div>
+        <div class="hint-row">${mine ? "Toque de novo na sua nota pra desfazer." : "Dá tua nota nesse prato."}</div>
+      </div>`;
+  };
+
+  /* Palpite de preço: o valor só aparece depois que você chuta. */
+  const priceBlock = () => {
+    if (!post.price) return "";
+    const myUid = store.uid();
+    const isMine = post.uid === myUid;
+    const guesses = post.guesses || {};
+    const myGuess = guesses[myUid];
+    const revealed = isMine || myGuess != null;
+    const winner = guessWinner(guesses, post.price);
+
+    if (!revealed) {
+      return `
+        <div class="card guess-card">
+          <div class="guess-title">💸 Quanto você acha que custou?</div>
+          <div class="guess-row">
+            <input data-guess type="number" inputmode="decimal" min="0" step="0.01" placeholder="R$ —">
+            <button class="btn btn-primary" data-guess-send style="width:auto;padding:12px 22px">Chutar</button>
+          </div>
+          <div class="hint-row">O preço real só aparece depois do seu chute.</div>
+        </div>`;
+    }
+
+    const list = Object.entries(guesses)
+      .sort((a, b) => Math.abs(a[1] - post.price) - Math.abs(b[1] - post.price));
+
+    return `
+      <div class="card guess-card">
+        <div class="guess-title">💸 Custou <strong>${formatMoney(post.price)}</strong></div>
+        ${list.length ? `<div class="guess-list">
+          ${list.map(([u, v], i) => `
+            <div class="guess-item ${i === 0 ? "win" : ""}">
+              <span class="who">${u === myUid ? "Você" : esc(nameOf(u))}</span>
+              <span class="val">${formatMoney(v)}</span>
+              <span class="off">${i === 0 && winner ? "🏆" : `${v > post.price ? "+" : "−"}${formatMoney(Math.abs(v - post.price)).replace("R$", "").trim()}`}</span>
+            </div>`).join("")}
+        </div>` : `<div class="hint-row">Ninguém chutou ainda.</div>`}
+      </div>`;
+  };
+
   const draw = () => {
     if (!post) return;
     const isMine = post.uid === store.uid();
     const meal = mealById(post.mealType);
+    const cuisine = cuisineById(post.cuisine);
     const reactions = post.reactions || {};
 
     body.innerHTML = `
@@ -350,6 +480,9 @@ export function postView({ cid, pid }) {
       ${post.description ? `<div class="post-desc">${esc(post.description)}</div>` : '<div style="height:10px"></div>'}
 
       <div class="meta-chips">
+        <span class="meta-chip">${post.homemade ? "👨‍🍳 Cozinhou" : "🛒 Comprou"}
+          <b class="pts">+${formatPoints(basePoints(post.homemade))}</b></span>
+        ${cuisine ? `<span class="meta-chip">${cuisine.emoji} ${cuisine.label}</span>` : ""}
         ${meal ? `<span class="meta-chip">${meal.emoji} ${meal.label}</span>` : ""}
         ${post.place ? `<span class="meta-chip">${icon("pin", 16)} ${esc(post.place)}</span>` : ""}
         ${Object.entries(reactions).map(([emoji, uids]) => `
@@ -360,12 +493,35 @@ export function postView({ cid, pid }) {
         <button class="meta-chip icon-only" data-add-react>${icon("emojiPlus", 20)}</button>
       </div>
 
+      ${ratingBlock()}
+      ${priceBlock()}
+
       <div style="border-top:1px solid var(--divider);padding-top:6px" data-comments></div>
       <div style="height:12px"></div>`;
 
     drawComments();
 
     body.querySelector("[data-profile]").addEventListener("click", () => navigate(`/c/${cid}/u/${post.uid}`));
+
+    body.querySelector("[data-rate]")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-score]");
+      if (!btn) return;
+      store.ratePost(cid, pid, Number(btn.dataset.score))
+        .catch((err) => toastError(err?.message || "Não deu pra dar nota."));
+    });
+
+    body.querySelector("[data-guess-send]")?.addEventListener("click", async (e) => {
+      const input = body.querySelector("[data-guess]");
+      const value = parseFloat(input.value);
+      if (!isFinite(value) || value < 0) return toastError("Bota um valor.");
+      e.currentTarget.disabled = true;
+      try {
+        await store.guessPrice(cid, pid, value);
+      } catch (err) {
+        e.currentTarget.disabled = false;
+        toastError(err?.message || "Não deu pra chutar.");
+      }
+    });
 
     body.querySelector("[data-add-react]").addEventListener("click", async () => {
       const chosen = await sheet("Reagir", EMOJIS.map((e) => ({ label: e, value: e })));
@@ -440,6 +596,7 @@ export function postView({ cid, pid }) {
     draw();
   });
   const b = store.watchComments(cid, pid, (c) => { comments = c; drawComments(); });
+  const c = store.watchMembers(cid, (list) => { members = list; if (post) draw(); });
 
-  return { el, destroy: () => { a(); b(); } };
+  return { el, destroy: () => { a(); b(); c(); } };
 }

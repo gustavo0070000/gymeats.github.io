@@ -11,6 +11,8 @@ import { composeView, postView } from "./views/post.js";
 import { rankingsView } from "./views/rankings.js";
 import { chatView } from "./views/chat.js";
 import { profileView } from "./views/profile.js";
+import { guideView } from "./views/guide.js";
+import { recapView } from "./views/recap.js";
 
 const appEl = document.getElementById("app");
 
@@ -44,6 +46,8 @@ route("/c/:cid/bate-papo", guard(chatView));
 route("/c/:cid/novo", guard(composeView));
 route("/c/:cid/convite", guard(inviteView));
 route("/c/:cid/editar", guard(editChallengeView));
+route("/c/:cid/guia", guard(guideView));
+route("/c/:cid/recap", guard(recapView));
 route("/c/:cid/p/:pid", guard(postView));
 route("/c/:cid/u/:uid", guard(profileView));
 

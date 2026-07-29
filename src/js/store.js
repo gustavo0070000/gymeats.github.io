@@ -4,19 +4,25 @@ import {
   arrayUnion, arrayRemove, increment, writeBatch, runTransaction,
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
+import {
+  pointsFor, basePoints, ratingAverage, placeKey, MIN_RATINGS,
+} from "./food.js";
 
 /* ============================================================
    Modelo de dados
 
    users/{uid}                    perfil + lista de desafios
    challenges/{cid}               desafio (memberUids controla o acesso)
-   challenges/{cid}/members/{uid} placar do membro (dias em que postou)
-   challenges/{cid}/posts/{pid}   post do prato (miniatura embutida)
+   challenges/{cid}/members/{uid} placar: dias, pontos por dia, passaporte, coringas
+   challenges/{cid}/posts/{pid}   post do prato (miniatura embutida, notas, palpites)
    challenges/{cid}/posts/{pid}/comments/{id}
    challenges/{cid}/messages/{id} bate-papo
+   challenges/{cid}/places/{key}  guia: lugares visitados pelo grupo
    photos/{photoId}               foto em tamanho cheio (base64), carregada sob demanda
    codes/{CODE}                   código de convite -> challengeId
    ============================================================ */
+
+export const STARTING_JOKERS = 2;
 
 export const uid = () => auth.currentUser?.uid || null;
 
@@ -119,7 +125,9 @@ export async function createChallenge({ name, description, startDate, endDate, b
   });
   batch.set(doc(db, "challenges", cid, "members", u.uid), {
     name: u.name, photo: u.photo, role: "owner",
-    days: [], total: 0, joinedAt: serverTimestamp(),
+    days: [], dayPoints: {}, cuisines: [], jokerDays: [],
+    jokers: STARTING_JOKERS, homemadeCount: 0, boughtCount: 0,
+    total: 0, joinedAt: serverTimestamp(),
   });
   batch.update(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) });
   await batch.commit();
@@ -141,7 +149,9 @@ export async function joinByCode(rawCode) {
   batch.update(doc(db, "challenges", cid), { memberUids: arrayUnion(u.uid) });
   batch.set(doc(db, "challenges", cid, "members", u.uid), {
     name: u.name, photo: u.photo, role: "member",
-    days: [], total: 0, joinedAt: serverTimestamp(),
+    days: [], dayPoints: {}, cuisines: [], jokerDays: [],
+    jokers: STARTING_JOKERS, homemadeCount: 0, boughtCount: 0,
+    total: 0, joinedAt: serverTimestamp(),
   }, { merge: true });
   batch.update(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) });
   await batch.commit();
@@ -215,38 +225,71 @@ export async function loadPhoto(photoId) {
 
 /* ---------- Posts ---------- */
 
-export async function createPost(cid, { title, description, mealType, place, photo, thumb, at }) {
+export async function createPost(cid, {
+  title, description, mealType, cuisine, homemade, place, coords, price,
+  photo, thumb, at,
+}) {
   const u = me();
   const when = at ? toDate(at) : new Date();
   const key = dayKey(when);
+  const pKey = place ? placeKey(place) : "";
 
   const photoId = photo ? await savePhoto(photo, cid) : null;
 
   const postRef = doc(collection(db, "challenges", cid, "posts"));
-  const batch = writeBatch(db);
-  batch.set(postRef, {
-    uid: u.uid,
-    authorName: u.name,
-    authorPhoto: u.photo,
-    title: title || "",
-    description: description || "",
-    mealType: mealType || "",
-    place: place || "",
-    thumb: thumb || null,
-    photoId,
-    dayKey: key,
-    at: when,
-    createdAt: serverTimestamp(),
-    commentCount: 0,
-    reactions: {},
+  const memberRef = doc(db, "challenges", cid, "members", u.uid);
+
+  await runTransaction(db, async (tx) => {
+    const memberSnap = await tx.get(memberRef);
+    const member = memberSnap.exists() ? memberSnap.data() : {};
+
+    // O bônus de sequência olha a sequência já contando o dia deste post.
+    const days = new Set([...(member.days || []), ...(member.jokerDays || []), key]);
+    const points = pointsFor(homemade, streakFrom(days, when));
+
+    // Pontos são por dia e ficam com o melhor prato daquele dia.
+    const previous = (member.dayPoints || {})[key] || 0;
+
+    tx.set(postRef, {
+      uid: u.uid,
+      authorName: u.name,
+      authorPhoto: u.photo,
+      title: title || "",
+      description: description || "",
+      mealType: mealType || "",
+      cuisine: cuisine || "",
+      homemade: !!homemade,
+      place: place || "",
+      placeKey: pKey,
+      coords: coords || null,
+      price: isFinite(price) && price > 0 ? Number(price) : null,
+      guesses: {},
+      thumb: thumb || null,
+      photoId,
+      dayKey: key,
+      at: when,
+      createdAt: serverTimestamp(),
+      commentCount: 0,
+      reactions: {},
+      ratings: {},
+      ratingAvg: null,
+      ratingCount: 0,
+      basePoints: basePoints(homemade),
+    });
+
+    const patch = {
+      name: u.name, photo: u.photo,
+      days: arrayUnion(key),
+      total: increment(1),
+      lastPostAt: when,
+      [homemade ? "homemadeCount" : "boughtCount"]: increment(1),
+    };
+    if (points > previous) patch.dayPoints = { [key]: points };
+    if (cuisine) patch.cuisines = arrayUnion(cuisine);
+    tx.set(memberRef, patch, { merge: true });
   });
-  batch.set(doc(db, "challenges", cid, "members", u.uid), {
-    name: u.name, photo: u.photo,
-    days: arrayUnion(key),
-    total: increment(1),
-    lastPostAt: when,
-  }, { merge: true });
-  await batch.commit();
+
+  if (pKey) await touchPlace(cid, pKey, { place, coords, thumb, postId: postRef.id });
 
   return postRef.id;
 }
@@ -272,13 +315,31 @@ export async function deletePost(cid, post) {
   await recountMember(cid, post.uid);
 }
 
-/** Recalcula os dias/total do membro a partir dos posts que sobraram. */
+/** Recalcula dias, pontos e passaporte do membro a partir dos posts que sobraram. */
 async function recountMember(cid, memberUid) {
   const q = query(collection(db, "challenges", cid, "posts"), where("uid", "==", memberUid));
   const snap = await getDocs(q);
-  const days = [...new Set(snap.docs.map((d) => d.data().dayKey))];
-  await setDoc(doc(db, "challenges", cid, "members", memberUid),
-    { days, total: snap.size }, { merge: true });
+  const posts = snap.docs.map((d) => d.data());
+
+  const days = [...new Set(posts.map((p) => p.dayKey))].sort();
+  const cuisines = [...new Set(posts.map((p) => p.cuisine).filter(Boolean))];
+  const homemadeCount = posts.filter((p) => p.homemade).length;
+
+  // Refaz a pontuação dia a dia, respeitando o bônus de sequência.
+  const daySet = new Set(days);
+  const dayPoints = {};
+  for (const day of days) {
+    const best = Math.max(...posts.filter((p) => p.dayKey === day).map((p) => (p.homemade ? 2 : 1)));
+    const [y, m, d] = day.split("-").map(Number);
+    dayPoints[day] = pointsFor(best === 2, streakFrom(daySet, new Date(y, m - 1, d)));
+  }
+
+  await setDoc(doc(db, "challenges", cid, "members", memberUid), {
+    days, dayPoints, cuisines,
+    homemadeCount,
+    boughtCount: posts.length - homemadeCount,
+    total: posts.length,
+  }, { merge: true });
 }
 
 /** Posts de um mês específico — usado no calendário do perfil. */
@@ -311,6 +372,136 @@ export async function toggleReaction(cid, pid, emoji) {
     else delete reactions[emoji];
     tx.update(ref, { reactions });
   });
+}
+
+/* ---------- Notas (1 a 10) ---------- */
+
+export async function ratePost(cid, pid, value) {
+  const id = uid();
+  const score = Math.max(1, Math.min(10, Math.round(Number(value))));
+  const postRef = doc(db, "challenges", cid, "posts", pid);
+
+  let placeDelta = null;
+
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(postRef);
+    if (!snap.exists()) return;
+    const post = snap.data();
+    if (post.uid === id) throw new Error("Não dá pra dar nota no próprio prato.");
+
+    const ratings = { ...(post.ratings || {}) };
+    const before = ratings[id];
+    // Tocar de novo na mesma nota tira o voto.
+    if (before === score) delete ratings[id];
+    else ratings[id] = score;
+
+    const avg = ratingAverage(ratings);
+    tx.update(postRef, {
+      ratings,
+      ratingAvg: avg,
+      ratingCount: Object.keys(ratings).length,
+    });
+
+    if (post.placeKey) {
+      placeDelta = {
+        key: post.placeKey,
+        sum: (ratings[id] || 0) - (before || 0),
+        count: (ratings[id] ? 1 : 0) - (before ? 1 : 0),
+      };
+    }
+  });
+
+  if (placeDelta && (placeDelta.sum || placeDelta.count)) {
+    await updateDoc(doc(db, "challenges", cid, "places", placeDelta.key), {
+      ratingSum: increment(placeDelta.sum),
+      ratingCount: increment(placeDelta.count),
+    }).catch(() => {});
+  }
+}
+
+/* ---------- Palpite de preço ---------- */
+
+export async function guessPrice(cid, pid, value) {
+  const id = uid();
+  const amount = Number(value);
+  if (!isFinite(amount) || amount < 0) throw new Error("Valor inválido.");
+
+  const postRef = doc(db, "challenges", cid, "posts", pid);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(postRef);
+    if (!snap.exists()) return;
+    const post = snap.data();
+    if (post.uid === id) throw new Error("Você já sabe quanto custou.");
+    if ((post.guesses || {})[id] != null) throw new Error("Você já chutou.");
+    tx.update(postRef, { guesses: { ...(post.guesses || {}), [id]: amount } });
+  });
+}
+
+/* ---------- Vale-faltas (coringas) ---------- */
+
+export async function useJoker(cid, day) {
+  const id = uid();
+  const ref = doc(db, "challenges", cid, "members", id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const member = snap.exists() ? snap.data() : {};
+    const left = member.jokers ?? STARTING_JOKERS;
+    if (left <= 0) throw new Error("Seus vale-faltas acabaram.");
+    if ((member.days || []).includes(day)) throw new Error("Você postou nesse dia.");
+    if ((member.jokerDays || []).includes(day)) throw new Error("Esse dia já tem vale-falta.");
+    if (day >= dayKey()) throw new Error("Vale-falta só vale pra dia que já passou.");
+    tx.set(ref, { jokers: left - 1, jokerDays: arrayUnion(day) }, { merge: true });
+  });
+}
+
+/* ---------- Guia: lugares ---------- */
+
+async function touchPlace(cid, key, { place, coords, thumb, postId }) {
+  const ref = doc(db, "challenges", cid, "places", key);
+  const patch = {
+    name: place,
+    visits: increment(1),
+    uids: arrayUnion(uid()),
+    lastAt: serverTimestamp(),
+    lastPostId: postId,
+  };
+  if (coords) patch.coords = coords;
+  if (thumb) patch.thumb = thumb;
+  await setDoc(ref, patch, { merge: true }).catch(() => {});
+}
+
+export function watchPlaces(cid, cb) {
+  return onSnapshot(collection(db, "challenges", cid, "places"), (snap) => {
+    const list = snap.docs.map((d) => {
+      const data = d.data();
+      const count = data.ratingCount || 0;
+      return { id: d.id, ...data, rating: count ? (data.ratingSum || 0) / count : null };
+    });
+    list.sort((a, b) => (b.visits || 0) - (a.visits || 0));
+    cb(list);
+  }, () => cb([]));
+}
+
+/* ---------- Posts de um período (recap, prato da semana, guia) ---------- */
+
+export async function periodPosts(cid, start, end, max = 500) {
+  const q = query(
+    collection(db, "challenges", cid, "posts"),
+    where("dayKey", ">=", dayKey(start)),
+    where("dayKey", "<=", dayKey(end)),
+    orderBy("dayKey", "desc"),
+    limit(max),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/** Melhores e piores pratos de uma lista, respeitando o mínimo de votos. */
+export function rankByRating(posts, { min = MIN_RATINGS } = {}) {
+  const eligible = posts.filter((p) => (p.ratingCount || 0) >= min && p.ratingAvg != null);
+  const best = [...eligible].sort((a, b) => b.ratingAvg - a.ratingAvg);
+  const worst = [...eligible].sort((a, b) => a.ratingAvg - b.ratingAvg);
+  return { best, worst, eligible };
 }
 
 /* ---------- Comentários ---------- */
@@ -387,41 +578,65 @@ export function periodRange(period, challenge) {
   return { start, end };
 }
 
-/** Ordena membros por dias ativos no período, com empates dividindo a posição. */
-export function standings(members, period, challenge) {
+/**
+ * Placar do período. `by` escolhe o critério:
+ *   "days"   — dias em que postou (o ranking clássico do GymRats)
+ *   "points" — pontos, onde cozinhar vale mais e sequência longa multiplica
+ * Empates dividem a mesma posição.
+ */
+export function standings(members, period, challenge, by = "days") {
   const { start, end } = periodRange(period, challenge);
   const from = dayKey(start), to = dayKey(end);
+  const inRange = (d) => d >= from && d <= to;
 
   const rows = members.map((m) => {
-    const days = (m.days || []).filter((d) => d >= from && d <= to);
-    return { ...m, count: days.length, days };
+    const days = (m.days || []).filter(inRange);
+    const jokerDays = (m.jokerDays || []).filter(inRange);
+    const points = Object.entries(m.dayPoints || {})
+      .filter(([d]) => inRange(d))
+      .reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
+    return { ...m, count: days.length, days, jokerDays, points };
   });
 
-  rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR"));
+  const value = (r) => (by === "points" ? r.points : r.count);
+  rows.sort((a, b) => value(b) - value(a) || a.name.localeCompare(b.name, "pt-BR"));
 
-  let lastCount = null, lastPos = 0;
+  let last = null, lastPos = 0;
   rows.forEach((row, i) => {
-    if (row.count !== lastCount) { lastPos = i + 1; lastCount = row.count; }
+    const v = value(row);
+    if (v !== last) { lastPos = i + 1; last = v; }
     row.position = lastPos;
   });
   return rows;
 }
 
-/** Sequência atual de dias seguidos postando (conta a partir de hoje ou ontem). */
-export function streak(days = []) {
-  const set = new Set(days);
-  const cursor = new Date();
-  if (!set.has(dayKey(cursor))) {
-    cursor.setDate(cursor.getDate() - 1);
-    if (!set.has(dayKey(cursor))) return 0;
-  }
+/** Conta dias seguidos para trás a partir de `end` (inclusive). */
+export function streakFrom(daySet, end = new Date()) {
+  const cursor = toDate(end) || new Date();
   let n = 0;
-  while (set.has(dayKey(cursor))) {
+  while (daySet.has(dayKey(cursor))) {
     n++;
     cursor.setDate(cursor.getDate() - 1);
   }
   return n;
 }
+
+/**
+ * Sequência atual: dias seguidos postando, contando de hoje (ou de ontem,
+ * se hoje ainda não postou). Vale-faltas contam como dia cumprido.
+ */
+export function streak(days = [], jokerDays = []) {
+  const set = new Set([...days, ...jokerDays]);
+  const cursor = new Date();
+  if (!set.has(dayKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+    if (!set.has(dayKey(cursor))) return 0;
+  }
+  return streakFrom(set, cursor);
+}
+
+/** Sequência de um membro, do jeito que ele está guardado. */
+export const memberStreak = (m) => streak(m?.days || [], m?.jokerDays || []);
 
 /** Quantas semanas o membro terminou em 1º lugar (usado na seção "Vitórias"). */
 export function weeklyWins(members) {

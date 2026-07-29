@@ -81,10 +81,16 @@ service cloud.firestore {
       match /posts/{pid} {
         allow read: if isMember(cid);
         allow create: if isMember(cid) && request.resource.data.uid == request.auth.uid;
-        // qualquer membro pode reagir; o resto só o autor mexe
+
+        // Qualquer membro pode reagir, dar nota e chutar o preço.
+        // O resto do post só o autor mexe.
+        // Obs.: nota e palpite de terceiro não são validados campo a campo —
+        // é um app entre amigos, e o custo de blindar isso não compensa.
         allow update: if isMember(cid) && (
                         resource.data.uid == request.auth.uid ||
-                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount'])
+                        request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['reactions', 'commentCount', 'ratings',
+                                    'ratingAvg', 'ratingCount', 'guesses'])
                       );
         allow delete: if isMember(cid) && (resource.data.uid == request.auth.uid || isOwner(cid));
 
@@ -94,6 +100,15 @@ service cloud.firestore {
           allow update: if false;
           allow delete: if isMember(cid) && (resource.data.uid == request.auth.uid || isOwner(cid));
         }
+      }
+
+      // ---------- Guia: lugares visitados ----------
+      // Qualquer membro cria e atualiza (contagem de visitas e nota média
+      // do lugar são somadas por quem posta ou dá nota).
+      match /places/{placeId} {
+        allow read: if isMember(cid);
+        allow create, update: if isMember(cid);
+        allow delete: if isOwner(cid);
       }
 
       // ---------- Bate-papo ----------

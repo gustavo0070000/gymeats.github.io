@@ -125,6 +125,8 @@ export function feedView({ cid }) {
   el.querySelector("[data-more]").addEventListener("click", async () => {
     const isOwner = challenge?.ownerUid === store.uid();
     const options = [
+      { label: "📊 Recap do período", value: "recap" },
+      { label: "📍 Guia do grupo", value: "guide" },
       { label: "Convidar galera", value: "invite" },
       { label: "Detalhes do desafio", value: "details" },
     ];
@@ -132,6 +134,8 @@ export function feedView({ cid }) {
     options.push({ label: "Sair do desafio", value: "leave", danger: true });
 
     const choice = await sheet(challenge?.name, options);
+    if (choice === "recap") navigate(`/c/${cid}/recap`);
+    if (choice === "guide") navigate(`/c/${cid}/guia`);
     if (choice === "invite") navigate(`/c/${cid}/convite`);
     if (choice === "details") navigate(`/c/${cid}/detalhes`);
     if (choice === "edit") navigate(`/c/${cid}/editar`);
@@ -203,6 +207,12 @@ export function detailsView({ cid }) {
 
       <div class="gap"></div>
       <div class="card list-card">
+        <button class="list-row" data-nav="/c/${cid}/recap">
+          <span class="ico">${icon("bolt", 22)}</span><span class="label">Recap do período</span><span class="chev">${icon("chevron", 18)}</span>
+        </button>
+        <button class="list-row" data-nav="/c/${cid}/guia">
+          <span class="ico">${icon("pin", 22)}</span><span class="label">Guia do grupo</span><span class="chev">${icon("chevron", 18)}</span>
+        </button>
         <button class="list-row" data-rules>
           <span class="ico">${icon("clipboard", 22)}</span><span class="label">Regras</span><span class="chev">${icon("chevron", 18)}</span>
         </button>
@@ -225,9 +235,12 @@ export function detailsView({ cid }) {
 
     body.querySelector("[data-rules]").addEventListener("click", () => {
       sheet("Como funciona", [{
-        label: challenge.description
-          ? challenge.description
-          : "Todo dia, cada um posta a foto de um prato. Cada dia com post vale 1 ponto. Quem tem mais dias lidera.",
+        label: (challenge.description ? challenge.description + "\n\n" : "")
+          + "Todo dia, cada um posta a foto de um prato.\n"
+          + "Comprou vale 1 ponto, cozinhou vale 2.\n"
+          + "A partir de 7 dias seguidos, tudo vale 1,5x.\n"
+          + "Cada um tem 2 vale-faltas pra salvar a sequência.\n"
+          + "A galera dá nota de 1 a 10 nos pratos.",
         value: null,
       }]);
     });
