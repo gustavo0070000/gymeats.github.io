@@ -18,14 +18,21 @@ Se um dia precisar gerar outra: **Configurações do projeto** → aba
 
 ---
 
-## 2. Publicar as regras do Firestore (1 min)
+## 2. Publicar as regras do Firestore
 
-Firestore Database → aba **Regras** → cole o
+**Automático.** A action [`Publicar regras do Firestore`](.github/workflows/deploy-rules.yml)
+roda sozinha sempre que o `firestore.rules` muda no `main`, e também dá pra
+disparar na mão: aba **Actions** → **Publicar regras do Firestore** →
+**Run workflow**. Usa o mesmo secret `FIREBASE_SERVICE_ACCOUNT` do deploy
+das funções.
+
+Isso existe porque as regras ficarem atrás do repositório já custou caro: o
+app gravava o registro do aparelho, o Firestore recusava com
+`permission-denied`, e a tela não mostrava nada — ninguém recebia
+notificação e não havia sinal do porquê.
+
+**Na mão**, se preferir: Firestore Database → aba **Regras** → cole o
 [`firestore.rules`](firestore.rules) → **Publicar**.
-
-Elas ganharam a permissão dos registros de notificação
-(`users/{uid}/pushTokens`), sem a qual o app não consegue guardar o
-aparelho.
 
 ---
 

@@ -1,0 +1,62 @@
+name: Publicar regras do Firestore
+
+# Mesma ideia do deploy das funções: dá pra disparar pelo botão "Run workflow"
+# na aba Actions, direto do celular. E roda sozinho sempre que o firestore.rules
+# muda no main — assim a versão publicada nunca fica atrás do repositório,
+# que já causou "permission-denied" difícil de achar.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "firestore.rules"
+      - "firebase.json"
+      - ".github/workflows/deploy-rules.yml"
+
+# Duas execuções ao mesmo tempo publicariam versões diferentes por cima uma da
+# outra; a fila garante que a última a rodar é a última a valer.
+concurrency:
+  group: firestore-rules
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar o Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Gravar a credencial
+        # O secret é o JSON inteiro da conta de serviço. Ele fica só na
+        # memória do runner e some quando o job acaba.
+        run: |
+          printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$RUNNER_TEMP/sa.json"
+          test -s "$RUNNER_TEMP/sa.json" || { echo "::error::Secret FIREBASE_SERVICE_ACCOUNT vazio ou ausente"; exit 1; }
+
+      - name: Publicar
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        # O Firebase compila as regras no servidor: erro de sintaxe reprova
+        # aqui e nada chega a ser publicado.
+        run: firebase deploy --only firestore:rules --project ogusamaaisa --non-interactive
+
+      - name: Apagar a credencial
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
+
+      - name: Resumo
+        if: success()
+        run: |
+          {
+            echo "### Regras publicadas ✅"
+            echo ""
+            echo "Commit: \`${GITHUB_SHA:0:7}\`"
+            echo ""
+            echo "Confira em: https://console.firebase.google.com/project/ogusamaaisa/firestore/rules"
+          } >> "$GITHUB_STEP_SUMMARY"
