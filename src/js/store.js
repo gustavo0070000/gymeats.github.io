@@ -404,6 +404,62 @@ async function recountMember(cid, memberUid) {
   }, { merge: true });
 }
 
+/* ============================================================
+   Diagnóstico e reparo de datas
+
+   `at` é a data que a pessoa escolheu no formulário; `createdAt` é o
+   carimbo do servidor no instante da publicação. Quando os dois brigam,
+   o do servidor é o confiável — o do formulário depende do relógio e do
+   fuso do aparelho de quem postou.
+   ============================================================ */
+
+export async function auditPosts(cid, max = 100) {
+  const q = query(collection(db, "challenges", cid, "posts"),
+    orderBy("createdAt", "desc"), limit(max));
+  const snap = await getDocs(q);
+
+  return snap.docs.map((d) => {
+    const p = { id: d.id, ...d.data() };
+    const escolhido = toDate(p.at);
+    const servidor = toDate(p.createdAt);
+    const horas = escolhido && servidor
+      ? Math.round(Math.abs(escolhido - servidor) / 36e5 * 10) / 10
+      : null;
+    return {
+      id: p.id,
+      title: p.title,
+      author: p.authorName,
+      uid: p.uid,
+      at: escolhido,
+      createdAt: servidor,
+      dayKeySalvo: p.dayKey || "",
+      dayKeyDoAt: escolhido ? dayKey(escolhido) : "",
+      dayKeyDoServidor: servidor ? dayKey(servidor) : "",
+      horasDeDiferenca: horas,
+      // Diferença de mais de meio dia quase sempre é relógio/fuso errado,
+      // não alguém publicando de propósito a foto de outro dia.
+      suspeito: horas != null && horas >= 12,
+    };
+  });
+}
+
+/** Regrava `at` e `dayKey` a partir do carimbo do servidor. */
+export async function repairDates(cid, ids) {
+  const alvo = new Set(ids);
+  const linhas = (await auditPosts(cid, 200)).filter((l) => alvo.has(l.id) && l.createdAt);
+
+  for (const linha of linhas) {
+    await updateDoc(doc(db, "challenges", cid, "posts", linha.id), {
+      at: linha.createdAt,
+      dayKey: dayKey(linha.createdAt),
+    });
+  }
+
+  const donos = [...new Set(linhas.map((l) => l.uid))];
+  for (const u of donos) await recountMember(cid, u);
+  return linhas.length;
+}
+
 /**
  * Recalcula o placar de todo mundo a partir dos posts.
  * Serve pra consertar desafios que começaram antes da pontuação existir

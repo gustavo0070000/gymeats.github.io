@@ -13,6 +13,7 @@ import { chatView } from "./views/chat.js";
 import { profileView } from "./views/profile.js";
 import { guideView } from "./views/guide.js";
 import { recapView } from "./views/recap.js";
+import { datesView } from "./views/dates.js";
 
 const appEl = document.getElementById("app");
 
@@ -48,6 +49,7 @@ route("/c/:cid/convite", guard(inviteView));
 route("/c/:cid/editar", guard(editChallengeView));
 route("/c/:cid/guia", guard(guideView));
 route("/c/:cid/recap", guard(recapView));
+route("/c/:cid/datas", guard(datesView));
 route("/c/:cid/p/:pid", guard(postView));
 route("/c/:cid/p/:pid/editar", guard(editPostView));
 route("/c/:cid/u/:uid", guard(profileView));

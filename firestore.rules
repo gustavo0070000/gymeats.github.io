@@ -86,11 +86,15 @@ service cloud.firestore {
         // O resto do post só o autor mexe.
         // Obs.: nota e palpite de terceiro não são validados campo a campo —
         // é um app entre amigos, e o custo de blindar isso não compensa.
+        // O dono do desafio também pode corrigir a data de um post alheio,
+        // pra conseguir consertar horário/fuso errado de quem publicou.
         allow update: if isMember(cid) && (
                         resource.data.uid == request.auth.uid ||
                         request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['reactions', 'commentCount', 'ratings',
-                                    'ratingAvg', 'ratingCount', 'guesses'])
+                                    'ratingAvg', 'ratingCount', 'guesses']) ||
+                        (isOwner(cid) && request.resource.data.diff(resource.data)
+                          .affectedKeys().hasOnly(['at', 'dayKey']))
                       );
         allow delete: if isMember(cid) && (resource.data.uid == request.auth.uid || isOwner(cid));
 

@@ -355,6 +355,11 @@ export async function editChallengeView({ cid }) {
 
         <div class="gap"></div>
         <div class="card list-card">
+          <button class="list-row" data-nav="/c/${cid}/datas">
+            <span class="ico">${icon("calendar", 22)}</span>
+            <span class="label">Datas dos pratos</span>
+            <span class="chev">${icon("chevron", 18)}</span>
+          </button>
           <button class="list-row" data-recalc>
             <span class="ico">${icon("refresh", 22)}</span>
             <span class="label">Recalcular placar</span>

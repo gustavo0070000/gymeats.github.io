@@ -1470,3 +1470,39 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
 .pad { padding: 0 var(--pad); }
 .gap-sm { height: 8px; }
 .gap { height: 18px; }
+
+/* ============================================================
+   Diagnóstico de datas
+   ============================================================ */
+
+.date-row {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+.date-row:last-child { border-bottom: none; }
+.date-row.bad { background: rgba(224, 71, 47, .06); }
+.date-title { font-size: 17px; font-weight: 700; }
+.date-author { font-size: 14px; color: var(--text-2); font-weight: 600; }
+.date-cols {
+  display: flex;
+  gap: 10px;
+  margin-top: 7px;
+}
+.date-cols > div { flex: 1; min-width: 0; }
+.date-cols span {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.date-cols b {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.date-row.bad .date-cols b { color: var(--red); }
