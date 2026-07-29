@@ -227,7 +227,7 @@ export async function loadPhoto(photoId) {
 
 export async function createPost(cid, {
   title, description, mealType, cuisine, homemade, place, coords, price,
-  photo, thumb, at, dateEditada = false,
+  photo, thumb, micro, at, dateEditada = false,
 }) {
   const u = me();
   const when = at ? toDate(at) : new Date();
@@ -268,6 +268,7 @@ export async function createPost(cid, {
       price: isFinite(price) && price > 0 ? Number(price) : null,
       guesses: {},
       thumb: thumb || null,
+      micro: micro || null,   // miniatura da notificação (cabe nos 4 KB do FCM)
       photoId,
       dayKey: key,
       at: when,

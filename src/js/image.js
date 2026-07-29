@@ -94,6 +94,15 @@ export function thumbnail(file) {
   return compress(file, { maxEdge: 160, maxBytes: 14 * 1024, square: true });
 }
 
+/**
+ * Versão ainda menor, pra viajar dentro da notificação push.
+ * O campo de dados do FCM tem teto de 4 KB no total, então a miniatura do
+ * feed não cabe — esta precisa ficar abaixo de ~2,5 KB sozinha.
+ */
+export function microThumbnail(file) {
+  return compress(file, { maxEdge: 96, maxBytes: 2400, square: true });
+}
+
 /** Converte um data URL de volta para File (usado ao reabrir a foto no editor). */
 export async function dataUrlToFile(dataUrl, name = "foto") {
   const blob = await (await fetch(dataUrl)).blob();

@@ -25,6 +25,9 @@ const fcm = getMessaging();
 const FUSO = "America/Sao_Paulo";
 const PADRAO = { posts: true, comments: true, ratings: true, recaps: true };
 
+// Teto do campo `data` de uma mensagem do FCM.
+const LIMITE_FCM = 4096;
+
 /* ============================================================
    Envio
    ============================================================ */
@@ -58,9 +61,24 @@ async function enviar(alvos, payload, registro = null) {
     return 0;
   }
 
+  // O campo `data` do FCM tem teto de 4096 bytes no total. A miniatura em
+  // base64 sozinha passa disso, e o FCM devolvia invalid-argument — que era
+  // lido como token morto e apagava o registro de quem ia receber.
   const dados = {};
   for (const [k, v] of Object.entries(payload)) {
     if (v !== undefined && v !== null && v !== "") dados[k] = String(v);
+  }
+
+  const tamanho = (o) => Object.entries(o)
+    .reduce((n, [k, v]) => n + Buffer.byteLength(k) + Buffer.byteLength(v), 0);
+
+  if (tamanho(dados) > LIMITE_FCM) {
+    delete dados.image;                       // a imagem é o que quase sempre estoura
+    if (tamanho(dados) > LIMITE_FCM) {
+      dados.body = (dados.body || "").slice(0, 300);
+      delete dados.tag;
+    }
+    console.warn(`payload acima de ${LIMITE_FCM} bytes; enviando sem imagem`);
   }
 
   const resultado = await fcm.sendEachForMulticast({
@@ -72,12 +90,15 @@ async function enviar(alvos, payload, registro = null) {
     },
   });
 
+  // Só some com o registro quando o Firebase diz que o token não vale mais.
+  // invalid-argument ficava aqui e apagava aparelho bom por erro de payload.
+  const TOKEN_MORTO = /registration-token-not-registered|invalid-registration-token|mismatched-credential/;
   const mortos = [];
   resultado.responses.forEach((r, i) => {
+    if (r.success) return;
     const codigo = r.error?.code || "";
-    if (!r.success && /registration-token-not-registered|invalid-argument/.test(codigo)) {
-      mortos.push(alvos[i]);
-    }
+    console.error(`falha no envio: ${codigo} — ${r.error?.message || ""}`);
+    if (TOKEN_MORTO.test(codigo)) mortos.push(alvos[i]);
   });
   await Promise.all(mortos.map((m) =>
     db.doc(`users/${m.uid}/pushTokens/${m.docId}`).delete().catch(() => {})));
@@ -121,10 +142,14 @@ async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0,
 
 const primeiroNome = (nome) => String(nome || "Alguém").trim().split(/\s+/)[0];
 
-/** Miniatura do prato como imagem da notificação (já vem em base64 no post). */
+/**
+ * Imagem da notificação. Usa a micro-miniatura gravada junto do post, que é
+ * pequena de propósito pra caber no orçamento de 4 KB do FCM. A miniatura do
+ * feed (~5 KB) não serve aqui — sozinha já estoura a mensagem inteira.
+ */
 const imagemDoPrato = (post) =>
-  (typeof post?.thumb === "string" && post.thumb.startsWith("data:") && post.thumb.length < 60000)
-    ? post.thumb
+  (typeof post?.micro === "string" && post.micro.startsWith("data:") && post.micro.length <= 2800)
+    ? post.micro
     : "";
 
 async function membrosDoDesafio(cid) {
