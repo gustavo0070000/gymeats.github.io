@@ -2,7 +2,7 @@
   "name": "gymeats-functions",
   "description": "Notificações do GymEats",
   "private": true,
-  "engines": { "node": "20" },
+  "engines": { "node": "22" },
   "main": "index.js",
   "dependencies": {
     "firebase-admin": "^13.0.2",

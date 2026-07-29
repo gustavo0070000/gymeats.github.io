@@ -43,10 +43,15 @@ Não precisa instalar nada nem configurar credencial.
 
 ```bash
 git clone https://github.com/gustavo0070000/gymeats.github.io
-cd gymeats.github.io
+cd gymeats.github.io/functions && npm install && cd ..
 npm install -g firebase-tools
 firebase deploy --only functions --project ogusamaaisa
 ```
+
+O `npm install` dentro de `functions/` é obrigatório: a pasta
+`node_modules` não vai pro Git, e o Firebase CLI precisa dela pra ler o
+código e descobrir quais funções existem. Sem isso ele reclama de
+"Couldn't find firebase-functions package".
 
 Na primeira vez ele pede pra ativar algumas APIs (Cloud Functions,
 Cloud Build, Artifact Registry, Cloud Scheduler) — responda **sim** a todas.
