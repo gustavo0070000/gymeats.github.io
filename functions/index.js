@@ -78,7 +78,7 @@ async function enviar(alvos, payload, registro = null) {
   if (!alvos.length) {
     if (registro) await anotar({ ...registro, payload, enviadas: 0, alvos: 0 });
     console.warn(`nada enviado (${registro?.tipo || "?"}): ${registro?.motivo || "sem alvos"}`);
-    return 0;
+    return { enviadas: 0, alvos: 0, limpos: 0, erros: [] };
   }
 
   // O campo `data` do FCM tem teto de 4096 bytes no total. A miniatura em
@@ -114,12 +114,16 @@ async function enviar(alvos, payload, registro = null) {
   // invalid-argument ficava aqui e apagava aparelho bom por erro de payload.
   const TOKEN_MORTO = /registration-token-not-registered|invalid-registration-token|mismatched-credential/;
   const mortos = [];
+  const erros = [];
   resultado.responses.forEach((r, i) => {
     if (r.success) return;
-    const codigo = r.error?.code || "";
+    const codigo = r.error?.code || "erro-sem-codigo";
     console.error(`falha no envio: ${codigo} — ${r.error?.message || ""}`);
+    if (!erros.includes(codigo)) erros.push(codigo);
     if (TOKEN_MORTO.test(codigo)) mortos.push(alvos[i]);
   });
+  // Token morto sai da lista: na próxima abertura o app registra um novo
+  // sozinho (ensureRegistered), então o aparelho se conserta sem ninguém mexer.
   await Promise.all(mortos.map((m) =>
     db.doc(`users/${m.uid}/pushTokens/${m.docId}`).delete().catch(() => {})));
 
@@ -133,9 +137,10 @@ async function enviar(alvos, payload, registro = null) {
       enviadas: resultado.successCount,
       falhas: alvos.length - resultado.successCount,
       limpos: mortos.length,
+      erro: erros.join(", "),
     });
   }
-  return resultado.successCount;
+  return { enviadas: resultado.successCount, alvos: alvos.length, limpos: mortos.length, erros };
 }
 
 /**
@@ -144,7 +149,7 @@ async function enviar(alvos, payload, registro = null) {
  * de quem enxerga o desafio vale aqui. A imagem não entra: é base64 e só
  * incharia o documento.
  */
-async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0, motivo = "" }) {
+async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0, motivo = "", erro = "" }) {
   if (!cid) return;
   try {
     await db.collection(`challenges/${cid}/notifications`).add({
@@ -152,7 +157,7 @@ async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0,
       title: payload.title || "",
       body: (payload.body || "").slice(0, 200),
       url: payload.url || "",
-      alvos, enviadas, falhas, limpos,
+      alvos, enviadas, falhas, limpos, erro,
       motivo: alvos ? "" : motivo,
       at: FieldValue.serverTimestamp(),
     });
@@ -356,6 +361,30 @@ exports.recapAnual = onSchedule(
    Teste
    ============================================================ */
 
+/** Traduz o código do FCM pra uma frase que diz o que fazer. */
+function explicarErro(erros = [], limpos = 0) {
+  const codigo = erros.join(" ");
+  if (/registration-token-not-registered|invalid-registration-token/.test(codigo)) {
+    return "O registro deste aparelho tinha vencido — acabei de apagar o antigo. "
+      + "Feche e abra o app: ele registra de novo sozinho, aí é só testar outra vez.";
+  }
+  if (/mismatched-credential|third-party-auth/.test(codigo)) {
+    return "O registro deste aparelho foi feito com outra chave do Web Push. "
+      + "Toque em \"Desligar neste aparelho\" e ligue de novo.";
+  }
+  if (/invalid-argument/.test(codigo)) {
+    return "O Firebase recusou o conteúdo da mensagem (invalid-argument). "
+      + "Isso é bug do app, não do seu aparelho — me avise.";
+  }
+  if (/quota|unavailable|internal/.test(codigo)) {
+    return "O Firebase está fora do ar ou recusou por limite. Tente de novo daqui a pouco.";
+  }
+  if (limpos) {
+    return `O registro estava vencido e foi apagado (${codigo}). Feche e abra o app pra registrar de novo.`;
+  }
+  return `O Firebase recusou o envio: ${codigo || "sem código"}.`;
+}
+
 /**
  * Dispara uma notificação só pra quem chamou. É o jeito de separar
  * "o gatilho não rodou" de "o aparelho não está registrado": aqui não
@@ -379,20 +408,21 @@ exports.testarNotificacao = onCall(async (request) => {
     .map((d) => ({ uid, docId: d.id, token: d.data().token }))
     .filter((t) => t.token);
 
-  const enviadas = await enviar(alvos, {
+  const r = await enviar(alvos, {
     title: "Deu certo! 🎉",
     body: "As notificações do GymEats estão funcionando neste aparelho.",
     url: "/#/notificacoes",
   });
 
   return {
-    ok: enviadas > 0,
+    ok: r.enviadas > 0,
     aparelhos: alvos.length,
-    enviadas,
-    motivo: enviadas > 0 ? "" : "falha-envio",
-    detalhe: enviadas > 0
-      ? ""
-      : "O aparelho está registrado, mas o Firebase recusou o envio. "
-        + "Veja o log da função pra saber o código do erro.",
+    enviadas: r.enviadas,
+    limpos: r.limpos,
+    erros: r.erros,
+    motivo: r.enviadas > 0 ? "" : "falha-envio",
+    // O código do FCM vem junto: mandar a pessoa "olhar o log da função" era
+    // inútil pra quem não é dono do projeto.
+    detalhe: r.enviadas > 0 ? "" : explicarErro(r.erros, r.limpos),
   };
 });

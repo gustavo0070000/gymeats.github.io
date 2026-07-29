@@ -74,6 +74,7 @@ export function sentView({ cid }) {
                       : `nenhum destinatário${l.motivo ? ` — ${esc(l.motivo)}` : ""}`}
                     ${l.falhas ? ` · ${l.falhas} ${l.falhas === 1 ? "falha" : "falhas"}` : ""}
                     ${l.limpos ? ` · ${l.limpos} token limpo` : ""}
+                    ${l.erro ? ` · ${esc(l.erro)}` : ""}
                   </span>
                 </span>
                 <span class="sent-when">${esc(relative(l.at))}</span>
