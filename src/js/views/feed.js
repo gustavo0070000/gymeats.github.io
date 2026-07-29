@@ -81,23 +81,23 @@ export function feedView({ cid }) {
       strip.setAttribute("data-nav", `/c/${cid}/classificacoes`);
     }
     // Diagnostic: show top rows for live inspection when debugging issues
-    const debugEl = headerEl.querySelector("[data-debug]");
-    if (debugEl) {
-      try {
-        const top = rows.slice(0, 5).map((r) => ({
-          uid: r.uid,
-          name: r.name,
-          points: r.points,
-          count: r.count,
-          position: r.position,
-          total: r.total,
-          lastPostAt: r.lastPostAt ? (r.lastPostAt.toDate ? r.lastPostAt.toDate().toISOString() : r.lastPostAt) : null,
-        }));
-        debugEl.textContent = JSON.stringify(top, null, 2);
-      } catch (e) {
-        debugEl.textContent = String(e);
-      }
-    }
+    // const debugEl = headerEl.querySelector("[data-debug]");
+    // if (debugEl) {
+    //   try {
+    //     const top = rows.slice(0, 5).map((r) => ({
+    //       uid: r.uid,
+    //       name: r.name,
+    //       points: r.points,
+    //       count: r.count,
+    //       position: r.position,
+    //       total: r.total,
+    //       lastPostAt: r.lastPostAt ? (r.lastPostAt.toDate ? r.lastPostAt.toDate().toISOString() : r.lastPostAt) : null,
+    //     }));
+    //     debugEl.textContent = JSON.stringify(top, null, 2);
+    //   } catch (e) {
+    //     debugEl.textContent = String(e);
+    //   }
+    // }
     renderCounter();
   };
 
