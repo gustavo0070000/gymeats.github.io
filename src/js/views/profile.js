@@ -52,8 +52,9 @@ export function profileView({ cid, uid: memberUid }) {
 
     const days = m.days || [];
     const stk = store.memberStreak(m);
-    const points = Object.values(m.dayPoints || {}).reduce((a, b) => a + (Number(b) || 0), 0);
-
+    const points = Number(
+      m.totalPoints ?? Object.values(m.dayPoints || {}).reduce((a, b) => a + (Number(b) || 0), 0)
+    );
     body.innerHTML = `
       <div class="profile-head">
         ${avatar(m, "hero")}

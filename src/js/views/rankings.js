@@ -95,7 +95,7 @@ export function rankingsView({ cid }) {
         </button>` : ""}
       ${board === "points" ? `
         <div class="pad hint-row" style="padding-bottom:8px">
-          Comprou vale 1 ponto, cozinhou vale 2. A partir de 7 dias seguidos, tudo vale 1,5x.
+          Cada post vale 1 ponto se foi comprado ou 2 pontos se foi feito em casa. O bônus de 7 dias seguidos multiplica o valor do post.
         </div>` : ""}
       ${wins.length ? `
         <div class="section-label left">Vitórias</div>

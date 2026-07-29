@@ -56,7 +56,8 @@ export function feedView({ cid }) {
           ? `<div class="banner"><img src="${esc(challenge.bannerThumb)}" alt=""></div>`
           : `<div class="banner empty">${esc(challenge.name)}</div>`}
         <div class="standings-strip" data-strip></div>
-        <div class="feed-counter" data-counter></div>`;
+        <div class="feed-counter" data-counter></div>
+        <pre class="feed-debug" data-debug style="font-size:11px;margin:6px;padding:6px;background:rgba(0,0,0,0.04);color:#111;white-space:pre-wrap;max-height:160px;overflow:auto"></pre>`;
     }
 
     // O placar mostra PONTOS: cozinhar vale mais que comprar, e o bônus de
@@ -78,6 +79,24 @@ export function feedView({ cid }) {
         ${leader ? cell(leader, leader.points, "Líder") : ""}
         ${mine ? cell(mine, mine.points, "Você") : ""}`;
       strip.setAttribute("data-nav", `/c/${cid}/classificacoes`);
+    }
+    // Diagnostic: show top rows for live inspection when debugging issues
+    const debugEl = headerEl.querySelector("[data-debug]");
+    if (debugEl) {
+      try {
+        const top = rows.slice(0, 5).map((r) => ({
+          uid: r.uid,
+          name: r.name,
+          points: r.points,
+          count: r.count,
+          position: r.position,
+          total: r.total,
+          lastPostAt: r.lastPostAt ? (r.lastPostAt.toDate ? r.lastPostAt.toDate().toISOString() : r.lastPostAt) : null,
+        }));
+        debugEl.textContent = JSON.stringify(top, null, 2);
+      } catch (e) {
+        debugEl.textContent = String(e);
+      }
     }
     renderCounter();
   };
@@ -280,8 +299,8 @@ export function detailsView({ cid }) {
       sheet("Como funciona", [{
         label: (challenge.description ? challenge.description + "\n\n" : "")
           + "Todo dia, cada um posta a foto de um prato.\n"
-          + "Comprou vale 1 ponto, cozinhou vale 2.\n"
-          + "A partir de 7 dias seguidos, tudo vale 1,5x.\n"
+          + "Comprou vale 1 ponto; cozinhou vale 2 pontos.\n"
+          + "A partir de 7 dias seguidos, ambos valem 1,5 ponto.\n"
           + "Cada um tem 2 vale-faltas pra salvar a sequência.\n"
           + "A galera dá nota de 1 a 10 nos pratos.",
         value: null,

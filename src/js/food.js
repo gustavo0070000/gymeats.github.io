@@ -51,9 +51,9 @@ export const cuisineById = (id) => CUISINES.find((c) => c.id === id);
    - prato feito em casa ....... 2 pontos
    - a partir de 7 dias seguidos, tudo vale 1,5x
 
-   Os pontos são por DIA, não por post: o dia fica valendo o
-   melhor prato daquele dia (cozinhar depois de ter comprado
-   sobe a pontuação do dia, postar de novo não acumula).
+   Os pontos são por post: cada prato vale 1 ponto se foi comprado
+   e 2 pontos se foi feito em casa. O acumulado por dia fica em
+   dayPoints, e o total do membro usa totalPoints para o ranking.
    ============================================================ */
 
 export const POINTS_BOUGHT = 1;

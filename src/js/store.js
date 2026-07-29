@@ -127,7 +127,7 @@ export async function createChallenge({ name, description, startDate, endDate, b
     name: u.name, photo: u.photo, role: "owner",
     days: [], dayPoints: {}, cuisines: [], jokerDays: [],
     jokers: STARTING_JOKERS, homemadeCount: 0, boughtCount: 0,
-    total: 0, joinedAt: serverTimestamp(),
+    total: 0, totalPoints: 0, joinedAt: serverTimestamp(),
   });
   batch.update(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) });
   await batch.commit();
@@ -151,7 +151,7 @@ export async function joinByCode(rawCode) {
     name: u.name, photo: u.photo, role: "member",
     days: [], dayPoints: {}, cuisines: [], jokerDays: [],
     jokers: STARTING_JOKERS, homemadeCount: 0, boughtCount: 0,
-    total: 0, joinedAt: serverTimestamp(),
+    total: 0, totalPoints: 0, joinedAt: serverTimestamp(),
   }, { merge: true });
   batch.update(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) });
   await batch.commit();
@@ -249,9 +249,8 @@ export async function createPost(cid, {
     // O bônus de sequência olha a sequência já contando o dia deste post.
     const days = new Set([...(member.days || []), ...(member.jokerDays || []), key]);
     const points = pointsFor(homemade, streakFrom(days, when));
-
-    // Pontos são por dia e ficam com o melhor prato daquele dia.
-    const previous = (member.dayPoints || {})[key] || 0;
+    const dayPoints = { ...(member.dayPoints || {}) };
+    const nextDayTotal = Number(dayPoints[key] || 0) + points;
 
     tx.set(postRef, {
       uid: u.uid,
@@ -287,10 +286,11 @@ export async function createPost(cid, {
       name: u.name, photo: u.photo,
       days: arrayUnion(key),
       total: increment(1),
+      totalPoints: increment(points),
       lastPostAt: when,
       [homemade ? "homemadeCount" : "boughtCount"]: increment(1),
     };
-    if (points > previous) patch.dayPoints = { [key]: points };
+    patch.dayPoints = { ...dayPoints, [key]: nextDayTotal };
     if (cuisine) patch.cuisines = arrayUnion(cuisine);
     tx.set(memberRef, patch, { merge: true });
   });
@@ -405,17 +405,22 @@ async function recountMember(cid, memberUid) {
   const cuisines = [...new Set(posts.map((p) => p.cuisine).filter(Boolean))];
   const homemadeCount = posts.filter((p) => p.homemade).length;
 
-  // Refaz a pontuação dia a dia, respeitando o bônus de sequência.
+  // Refaz a pontuação post a post, respeitando o bônus de sequência.
   const daySet = new Set(days);
   const dayPoints = {};
-  for (const day of days) {
-    const best = Math.max(...posts.filter((p) => postDay(p) === day).map((p) => (p.homemade ? 2 : 1)));
+  let totalPoints = 0;
+  for (const post of posts) {
+    const day = postDay(post);
+    if (!day) continue;
     const [y, m, d] = day.split("-").map(Number);
-    dayPoints[day] = pointsFor(best === 2, streakFrom(daySet, new Date(y, m - 1, d)));
+    const when = new Date(y, m - 1, d);
+    const points = pointsFor(!!post.homemade, streakFrom(daySet, when));
+    dayPoints[day] = (dayPoints[day] || 0) + points;
+    totalPoints += points;
   }
 
   await setDoc(doc(db, "challenges", cid, "members", memberUid), {
-    days, dayPoints, cuisines,
+    days, dayPoints, totalPoints, cuisines,
     homemadeCount,
     boughtCount: posts.length - homemadeCount,
     total: posts.length,
@@ -796,33 +801,27 @@ export function standings(members, period, challenge, by = "days") {
     const days = (m.days || []).filter(inRange);
     const jokerDays = (m.jokerDays || []).filter(inRange);
 
-    // Percorre os DIAS, não o mapa de pontos: posts criados antes da
-    // pontuação existir não têm entrada em dayPoints, e sem esse
-    // fallback o placar inteiro apareceria zerado.
+    // Usa o total acumulado de pontos do membro quando disponível, e cai
+    // para o somatório do mapa de dias para dados antigos.
     const scored = m.dayPoints || {};
-    const points = days.reduce(
-      (sum, d) => sum + (Number(scored[d]) || POINTS_BOUGHT), 0);
-
+    const points = Number(
+      m.totalPoints ?? Object.values(scored).reduce((sum, value) => sum + (Number(value) || 0), 0)
+    );
     return { ...m, count: days.length, days, jokerDays, points };
   });
 
   // Empate em pontos é resolvido por quem apareceu em mais dias, depois por
-  // quem tem a sequência maior. O nome só decide em último caso — antes,
-  // quem vinha primeiro no alfabeto liderava mesmo tendo postado menos.
+  // quem tem a sequência maior. O nome só decide em último caso.
   const value = (r) => (by === "points" ? r.points : r.count);
   rows.sort((a, b) =>
     value(b) - value(a)
     || b.count - a.count
     || memberStreak(b) - memberStreak(a)
-    || (b.total || 0) - (a.total || 0)
     || a.name.localeCompare(b.name, "pt-BR"));
 
-  // Só divide a posição quem empatou de verdade: mesmos pontos E mesmos dias.
-  let last = null, lastPos = 0;
+  // A posição é sempre a ordem da lista já classificada.
   rows.forEach((row, i) => {
-    const v = `${value(row)}|${row.count}`;
-    if (v !== last) { lastPos = i + 1; last = v; }
-    row.position = lastPos;
+    row.position = i + 1;
   });
   return rows;
 }
