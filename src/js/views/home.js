@@ -387,11 +387,19 @@ export function accountView() {
       <div class="pad"><button class="btn btn-primary" data-save>Salvar</button></div>
       <div class="gap"></div>
       <div class="card list-card">
+        <button class="list-row" data-refresh-app>
+          <span class="ico">${icon("refresh", 22)}</span>
+          <span class="label">Forçar atualização do app</span>
+        </button>
         <button class="list-row danger" data-logout>
           <span class="ico">${icon("exit", 22)}</span><span class="label">Sair da conta</span>
         </button>
       </div>
-      <div class="pad center muted" style="font-size:13px;padding-top:16px">
+      <div class="pad hint-row" style="padding-top:8px">
+        Use se o app parecer travado numa versão antiga. Limpa o cache e
+        recarrega — nenhum dado dos desafios é perdido.
+      </div>
+      <div class="pad center muted" style="font-size:13px;padding-top:10px">
         ${APP_NAME} ${APP_VERSION}
       </div>`;
 
@@ -406,6 +414,18 @@ export function accountView() {
       } catch { toastError("Não deu pra salvar."); }
       e.currentTarget.disabled = false;
     });
+    body.querySelector("[data-refresh-app]").addEventListener("click", async (e) => {
+      e.currentTarget.querySelector(".label").textContent = "Atualizando…";
+      try {
+        // Só o casco do app é descartado; os dados vivem no Firestore.
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+        await Promise.all(regs.map((r) => r.unregister()));
+      } catch { /* segue e recarrega mesmo assim */ }
+      location.reload();
+    });
+
     body.querySelector("[data-logout]").addEventListener("click", async () => {
       await logout();
       location.hash = "#/";
