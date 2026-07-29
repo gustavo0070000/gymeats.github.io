@@ -19,8 +19,9 @@ E, além do que o GymRats faz, tem o que só faz sentido com comida:
 | 📊 **Recap** | resumo de semana / mês / ano / desafio inteiro, pronto pra mandar no zap |
 
 É um **PWA**: roda no navegador e instala como app no celular.
-Roda inteiro no **free tier** — GitHub Pages + Firebase plano Spark.
-**Nenhum cartão de crédito é necessário.**
+Roda inteiro no **free tier** — GitHub Pages + Firebase.
+As notificações usam Cloud Functions, que pedem o plano Blaze — mas o uso
+fica dentro do free tier, então a conta continua em R$ 0.
 
 ---
 
@@ -181,6 +182,12 @@ src/js/
   icons.js                 ícones SVG
   views/                   uma tela por arquivo
 ```
+
+## Notificações
+
+Estão prontas no app e precisam de dois passos de configuração seus (chave
+do Web Push e deploy das funções). O passo a passo está em
+[NOTIFICACOES.md](NOTIFICACOES.md).
 
 ## Rodando na sua máquina
 

@@ -1506,3 +1506,61 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
   text-overflow: ellipsis;
 }
 .date-row.bad .date-cols b { color: var(--red); }
+
+/* ============================================================
+   Notificações
+   ============================================================ */
+
+.notif-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 20px 18px;
+}
+.notif-icon {
+  width: 66px; height: 66px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: #F0F0F0;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+.notif-icon.on { background: var(--red-soft); color: var(--red); }
+.notif-state { font-size: 19px; font-weight: 800; letter-spacing: -.2px; }
+.notif-sub {
+  font-size: 15px;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-top: 4px;
+  line-height: 1.4;
+  max-width: 300px;
+}
+
+.pref-hint {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+.switch {
+  flex: 0 0 auto;
+  width: 46px; height: 28px;
+  border-radius: 999px;
+  background: #DCDCDC;
+  position: relative;
+  transition: background .16s;
+}
+.switch i {
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  transition: transform .16s;
+}
+.switch.on { background: var(--red); }
+.switch.on i { transform: translateX(18px); }

@@ -3,7 +3,7 @@
 // e instantaneamente; os dados vêm do Firestore, que tem o próprio cache
 // em IndexedDB. Nunca cacheamos chamadas de rede do Firebase.
 
-const VERSION = "v10";
+const VERSION = "v11";
 const SHELL = `gymeats-shell-${VERSION}`;
 
 // O GitHub Pages serve com "cache-control: max-age=600". Um fetch normal
@@ -27,6 +27,7 @@ const SHELL_FILES = [
   "./src/js/icons.js",
   "./src/js/image.js",
   "./src/js/food.js",
+  "./src/js/push.js",
   "./src/js/views/home.js",
   "./src/js/views/feed.js",
   "./src/js/views/post.js",
@@ -36,6 +37,7 @@ const SHELL_FILES = [
   "./src/js/views/guide.js",
   "./src/js/views/recap.js",
   "./src/js/views/dates.js",
+  "./src/js/views/notifications.js",
   "./src/js/views/place-picker.js",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",
@@ -63,6 +65,57 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== SHELL).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+/* ============================================================
+   Notificações
+
+   As Cloud Functions mandam só o campo `data`, então quem monta a
+   notificação é este handler. Se a mensagem viesse com `notification`,
+   o navegador montaria sozinho e a gente perderia o controle do texto,
+   do ícone e do link.
+   ============================================================ */
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    const bruto = event.data?.json() || {};
+    payload = bruto.data || bruto;
+  } catch {
+    payload = { title: "GymEats", body: event.data?.text() || "" };
+  }
+
+  const titulo = payload.title || "GymEats";
+  const opcoes = {
+    body: payload.body || "",
+    icon: payload.icon || "./assets/icons/icon-192.png",
+    badge: "./assets/icons/icon-192.png",
+    image: payload.image || undefined,   // a foto do prato
+    tag: payload.tag || undefined,       // agrupa avisos do mesmo prato
+    renotify: !!payload.tag,
+    data: { url: payload.url || "./" },
+    vibrate: [90, 40, 90],
+  };
+
+  event.waitUntil(self.registration.showNotification(titulo, opcoes));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const destino = new URL(event.notification.data?.url || "./", self.location.href).href;
+
+  event.waitUntil((async () => {
+    const abas = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    // Se o app já está aberto, leva a aba existente pro lugar certo.
+    for (const aba of abas) {
+      if (aba.url.startsWith(self.registration.scope)) {
+        await aba.focus();
+        if ("navigate" in aba) await aba.navigate(destino).catch(() => {});
+        return;
+      }
+    }
+    await self.clients.openWindow(destino);
+  })());
 });
 
 self.addEventListener("fetch", (event) => {

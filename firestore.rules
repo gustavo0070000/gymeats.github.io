@@ -37,6 +37,12 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create, update: if isSelf(uid);
       allow delete: if false;
+
+      // Registro de notificação deste aparelho. Só o dono enxerga e mexe;
+      // as Cloud Functions leem pelo Admin SDK, que passa por cima daqui.
+      match /pushTokens/{tokenId} {
+        allow read, write: if isSelf(uid);
+      }
     }
 
     // ---------- Códigos de convite ----------

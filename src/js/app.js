@@ -14,6 +14,7 @@ import { profileView } from "./views/profile.js";
 import { guideView } from "./views/guide.js";
 import { recapView } from "./views/recap.js";
 import { datesView } from "./views/dates.js";
+import { notificationsView } from "./views/notifications.js";
 
 const appEl = document.getElementById("app");
 
@@ -39,6 +40,7 @@ route("/desafios", guard(homeView));
 route("/novo", guard(newChallengeView));
 route("/entrar", guard(joinView));
 route("/conta", guard(accountView));
+route("/notificacoes", guard(notificationsView));
 
 route("/c/:cid", guard(feedView));
 route("/c/:cid/detalhes", guard(detailsView));

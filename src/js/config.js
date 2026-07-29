@@ -27,11 +27,16 @@ export const PHOTO = {
   avatarBytes: 120 * 1024,
 };
 
+// Chave pública do Web Push. Pegue em: Configurações do projeto >
+// Cloud Messaging > Configuração da Web > Certificados push da Web >
+// Gerar par de chaves. Só a pública vai aqui; a privada fica com o Firebase.
+export const VAPID_PUBLIC_KEY = "COLE_AQUI";
+
 export const APP_NAME = "GymEats";
 
 // Aparece em Minha conta. Serve pra saber qual código está rodando
 // de verdade no celular quando algo parece estranho.
-export const APP_VERSION = "v10";
+export const APP_VERSION = "v11";
 
 export function isConfigured() {
   const key = String(firebaseConfig.apiKey || "");

@@ -387,6 +387,14 @@ export function accountView() {
       <div class="pad"><button class="btn btn-primary" data-save>Salvar</button></div>
       <div class="gap"></div>
       <div class="card list-card">
+        <button class="list-row" data-nav="/notificacoes">
+          <span class="ico">${icon("bell", 22)}</span>
+          <span class="label">Notificações</span>
+          <span class="chev">${icon("chevron", 18)}</span>
+        </button>
+      </div>
+
+      <div class="card list-card">
         <button class="list-row" data-refresh-app>
           <span class="ico">${icon("refresh", 22)}</span>
           <span class="label">Forçar atualização do app</span>
