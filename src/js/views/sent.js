@@ -51,7 +51,8 @@ export function sentView({ cid }) {
 
       ${semDestino ? `<div class="notice">
         ${semDestino} ${semDestino === 1 ? "envio não teve destinatário" : "envios não tiveram destinatário"}.
-        Ou ninguém ligou as notificações ainda, ou quem receberia desligou esse tipo.
+        O motivo de cada um aparece na linha. "Sem aparelho registrado" quer dizer
+        que a pessoa precisa abrir <strong>Minha conta → Notificações</strong> e ligar por lá.
       </div>` : ""}
 
       ${[...porDia.entries()].map(([dia, itens]) => `
@@ -70,7 +71,7 @@ export function sentView({ cid }) {
                   <span class="sent-meta">
                     ${alvos
                       ? `${entregue} de ${alvos} ${alvos === 1 ? "aparelho" : "aparelhos"}`
-                      : "nenhum destinatário"}
+                      : `nenhum destinatário${l.motivo ? ` — ${esc(l.motivo)}` : ""}`}
                     ${l.falhas ? ` · ${l.falhas} ${l.falhas === 1 ? "falha" : "falhas"}` : ""}
                     ${l.limpos ? ` · ${l.limpos} token limpo` : ""}
                   </span>

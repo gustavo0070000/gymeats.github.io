@@ -11,6 +11,7 @@
 
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -32,22 +33,40 @@ const LIMITE_FCM = 4096;
    Envio
    ============================================================ */
 
-/** Tokens de um usuário, junto com a preferência dele. */
+/**
+ * Tokens de um usuário, junto com a preferência dele.
+ * Devolve `{ tokens, semPref, semAparelho }` — a lista vazia sozinha não
+ * dizia se a pessoa desligou o aviso ou se nunca registrou o aparelho, e essa
+ * diferença é exatamente o que faltava pra entender "nenhum destinatário".
+ */
 async function destinatario(uid, tipo) {
   const perfil = await db.doc(`users/${uid}`).get();
   const prefs = { ...PADRAO, ...(perfil.data()?.notify || {}) };
-  if (!prefs[tipo]) return [];
+  if (!prefs[tipo]) return { tokens: [], semPref: 1, semAparelho: 0 };
 
-  const tokens = await db.collection(`users/${uid}/pushTokens`).get();
-  return tokens.docs
+  const docs = await db.collection(`users/${uid}/pushTokens`).get();
+  const tokens = docs.docs
     .map((d) => ({ uid, docId: d.id, token: d.data().token }))
     .filter((t) => t.token);
+  return { tokens, semPref: 0, semAparelho: tokens.length ? 0 : 1 };
 }
 
 /** Junta os tokens de várias pessoas, respeitando as preferências. */
 async function destinatarios(uids, tipo) {
-  const listas = await Promise.all(uids.map((uid) => destinatario(uid, tipo)));
-  return listas.flat();
+  const partes = await Promise.all(uids.map((uid) => destinatario(uid, tipo)));
+  return partes.reduce((acc, p) => ({
+    tokens: acc.tokens.concat(p.tokens),
+    semPref: acc.semPref + p.semPref,
+    semAparelho: acc.semAparelho + p.semAparelho,
+  }), { tokens: [], semPref: 0, semAparelho: 0 });
+}
+
+/** Frase curta pro log explicar por que não foi pra ninguém. */
+function motivoVazio({ semPref, semAparelho }) {
+  if (semAparelho && semPref) return `${semAparelho} sem aparelho registrado, ${semPref} com o aviso desligado`;
+  if (semAparelho) return `${semAparelho} ${semAparelho === 1 ? "pessoa" : "pessoas"} sem aparelho registrado`;
+  if (semPref) return `${semPref} ${semPref === 1 ? "pessoa" : "pessoas"} com esse aviso desligado`;
+  return "ninguém pra avisar";
 }
 
 /**
@@ -58,6 +77,7 @@ async function destinatarios(uids, tipo) {
 async function enviar(alvos, payload, registro = null) {
   if (!alvos.length) {
     if (registro) await anotar({ ...registro, payload, enviadas: 0, alvos: 0 });
+    console.warn(`nada enviado (${registro?.tipo || "?"}): ${registro?.motivo || "sem alvos"}`);
     return 0;
   }
 
@@ -124,7 +144,7 @@ async function enviar(alvos, payload, registro = null) {
  * de quem enxerga o desafio vale aqui. A imagem não entra: é base64 e só
  * incharia o documento.
  */
-async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0 }) {
+async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0, motivo = "" }) {
   if (!cid) return;
   try {
     await db.collection(`challenges/${cid}/notifications`).add({
@@ -133,6 +153,7 @@ async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0,
       body: (payload.body || "").slice(0, 200),
       url: payload.url || "",
       alvos, enviadas, falhas, limpos,
+      motivo: alvos ? "" : motivo,
       at: FieldValue.serverTimestamp(),
     });
   } catch (err) {
@@ -170,15 +191,15 @@ exports.aoPostarPrato = onDocumentCreated(
 
     const { challenge, uids } = await membrosDoDesafio(cid);
     const outros = uids.filter((u) => u !== post.uid);
-    const alvos = await destinatarios(outros, "posts");
+    const quem = await destinatarios(outros, "posts");
 
-    await enviar(alvos, {
+    await enviar(quem.tokens, {
       title: `${primeiroNome(post.authorName)} postou um prato`,
       body: post.title || challenge.name || "Novo prato no desafio",
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    }, { cid, tipo: "posts" });
+    }, { cid, tipo: "posts", motivo: motivoVazio(quem) });
   });
 
 /* ============================================================
@@ -196,14 +217,14 @@ exports.aoComentar = onDocumentCreated(
     const post = postSnap.data();
     if (!post || post.uid === comentario.uid) return;  // comentário no próprio prato
 
-    const alvos = await destinatario(post.uid, "comments");
-    await enviar(alvos, {
+    const quem = await destinatario(post.uid, "comments");
+    await enviar(quem.tokens, {
       title: `${primeiroNome(comentario.name)} comentou no seu prato`,
       body: comentario.text || "",
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    }, { cid, tipo: "comments" });
+    }, { cid, tipo: "comments", motivo: motivoVazio(quem) });
   });
 
 /* ============================================================
@@ -229,15 +250,15 @@ exports.aoDarNota = onDocumentUpdated(
     const nota = notasDepois[quem];
 
     const membro = await db.doc(`challenges/${cid}/members/${quem}`).get();
-    const alvos = await destinatario(depois.uid, "ratings");
+    const dono = await destinatario(depois.uid, "ratings");
 
-    await enviar(alvos, {
+    await enviar(dono.tokens, {
       title: `${primeiroNome(membro.data()?.name)} deu ${nota}/10 no seu prato`,
       body: depois.title || "",
       image: imagemDoPrato(depois),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    }, { cid, tipo: "ratings" });
+    }, { cid, tipo: "ratings", motivo: motivoVazio(dono) });
   });
 
 /* ============================================================
@@ -290,14 +311,14 @@ async function mandarRecap(periodo, de, ate, titulo) {
       ? ` · 2º ${primeiroNome(tabela[1].name)} com ${tabela[1].pontos}`
       : "";
 
-    const alvos = await destinatarios(challenge.memberUids || [], "recaps");
-    await enviar(alvos, {
+    const galera = await destinatarios(challenge.memberUids || [], "recaps");
+    await enviar(galera.tokens, {
       title: `${titulo} — ${quem}`,
       body: `${campeao.pontos} ${campeao.pontos === 1 ? "ponto" : "pontos"} em `
         + `${campeao.dias} ${campeao.dias === 1 ? "dia" : "dias"}${segundo}`,
       tag: `recap-${periodo}-${cid}`,
       url: `/#/c/${cid}/recap`,
-    }, { cid, tipo: "recaps" });
+    }, { cid, tipo: "recaps", motivo: motivoVazio(galera) });
   }
 }
 
@@ -329,3 +350,49 @@ exports.recapAnual = onSchedule(
     const ano = hoje.getFullYear() - 1;
     await mandarRecap("ano", `${ano}-01-01`, `${ano}-12-31`, `Recap de ${ano}`);
   });
+
+
+/* ============================================================
+   Teste
+   ============================================================ */
+
+/**
+ * Dispara uma notificação só pra quem chamou. É o jeito de separar
+ * "o gatilho não rodou" de "o aparelho não está registrado": aqui não
+ * há gatilho nenhum no meio do caminho.
+ */
+exports.testarNotificacao = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Entre na sua conta.");
+
+  const tokens = await db.collection(`users/${uid}/pushTokens`).get();
+  if (tokens.empty) {
+    return {
+      ok: false,
+      motivo: "sem-token",
+      detalhe: "Nenhum aparelho registrado no servidor. Desligue e ligue as "
+        + "notificações de novo — provavelmente o registro não chegou a ser gravado.",
+    };
+  }
+
+  const alvos = tokens.docs
+    .map((d) => ({ uid, docId: d.id, token: d.data().token }))
+    .filter((t) => t.token);
+
+  const enviadas = await enviar(alvos, {
+    title: "Deu certo! 🎉",
+    body: "As notificações do GymEats estão funcionando neste aparelho.",
+    url: "/#/notificacoes",
+  });
+
+  return {
+    ok: enviadas > 0,
+    aparelhos: alvos.length,
+    enviadas,
+    motivo: enviadas > 0 ? "" : "falha-envio",
+    detalhe: enviadas > 0
+      ? ""
+      : "O aparelho está registrado, mas o Firebase recusou o envio. "
+        + "Veja o log da função pra saber o código do erro.",
+  };
+});

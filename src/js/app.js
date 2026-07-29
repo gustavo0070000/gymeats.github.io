@@ -82,6 +82,8 @@ async function boot() {
 
     if (u) {
       try { await store.ensureUserDoc(); } catch { /* offline: segue com o cache */ }
+      // Sem esperar: se o registro de push tiver caído, regrava em segundo plano.
+      import("./push.js").then((push) => push.ensureRegistered()).catch(() => {});
     }
 
     if (!authReady) {
