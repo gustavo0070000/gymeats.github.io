@@ -31,7 +31,7 @@ export const APP_NAME = "GymEats";
 
 // Aparece em Minha conta. Serve pra saber qual código está rodando
 // de verdade no celular quando algo parece estranho.
-export const APP_VERSION = "v9";
+export const APP_VERSION = "v10";
 
 export function isConfigured() {
   const key = String(firebaseConfig.apiKey || "");

@@ -104,16 +104,24 @@ export function formatRating(n) {
   return (Math.round(n * 10) / 10).toFixed(1).replace(".", ",");
 }
 
-/** Quem chegou mais perto do preço real. */
-export function guessWinner(guesses = {}, price) {
+/**
+ * Quem chegou mais perto do preço real.
+ * Devolve TODOS os empatados: dois palpites iguais são a mesma vitória,
+ * e antes só o primeiro da lista levava o troféu.
+ */
+export function guessWinners(guesses = {}, price) {
   const entries = Object.entries(guesses);
-  if (!entries.length || !isFinite(price)) return null;
-  let best = null;
-  for (const [uid, value] of entries) {
-    const diff = Math.abs(value - price);
-    if (!best || diff < best.diff) best = { uid, value, diff };
-  }
-  return best;
+  if (!entries.length || !isFinite(price)) return [];
+  const comDiferenca = entries.map(([uid, value]) => ({
+    uid, value, diff: Math.abs(value - price),
+  }));
+  const menor = Math.min(...comDiferenca.map((g) => g.diff));
+  return comDiferenca.filter((g) => g.diff === menor);
+}
+
+/** Um vencedor só, pra quando basta saber se existe algum. */
+export function guessWinner(guesses = {}, price) {
+  return guessWinners(guesses, price)[0] || null;
 }
 
 /* ============================================================

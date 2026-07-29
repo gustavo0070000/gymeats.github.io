@@ -371,7 +371,9 @@ export async function updatePost(cid, post, {
     editedAt: serverTimestamp(),
   });
 
-  if (pKey) {
+  const anterior = post.placeKey || "";
+  if (anterior && anterior !== pKey) await releasePlace(cid, anterior, post.uid);
+  if (pKey && pKey !== anterior) {
     await touchPlace(cid, pKey, { place, coords, thumb: post.thumb, postId: post.id });
   }
   await recountMember(cid, post.uid);
@@ -466,12 +468,19 @@ export async function auditPosts(cid, max = 100) {
  */
 export async function updatePostPlace(cid, post, { place, coords }) {
   const pKey = resolvePlaceKey(place, coords);
+  const anterior = post.placeKey || "";
+
   await updateDoc(doc(db, "challenges", cid, "posts", post.id), {
     place: place || "",
     placeKey: pKey,
     coords: coords || null,
   });
-  if (pKey) {
+
+  // Trocar o endereço move a visita de um lugar pro outro. Sem isso, o
+  // antigo continuava no guia e o novo entrava do lado, como se o prato
+  // tivesse sido comido em dois lugares.
+  if (anterior && anterior !== pKey) await releasePlace(cid, anterior, post.uid);
+  if (pKey && pKey !== anterior) {
     await touchPlace(cid, pKey, { place, coords, thumb: post.thumb, postId: post.id });
   }
 }
@@ -633,13 +642,32 @@ async function touchPlace(cid, key, { place, coords, thumb, postId }) {
   await setDoc(ref, patch, { merge: true }).catch(() => {});
 }
 
+/** Tira uma visita de um lugar — usado quando um prato troca de endereço. */
+async function releasePlace(cid, key, memberUid) {
+  if (!key) return;
+  const ref = doc(db, "challenges", cid, "places", key);
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const visitas = (snap.data().visits || 1) - 1;
+    if (visitas <= 0) {
+      // some da lista mesmo se a regra não deixar apagar (delete é só do dono)
+      await deleteDoc(ref).catch(() => updateDoc(ref, { visits: 0 }));
+    } else {
+      await updateDoc(ref, { visits: visitas, uids: arrayRemove(memberUid) });
+    }
+  } catch { /* o guia é secundário: não vale travar a edição por causa dele */ }
+}
+
 export function watchPlaces(cid, cb) {
   return onSnapshot(collection(db, "challenges", cid, "places"), (snap) => {
     const list = snap.docs.map((d) => {
       const data = d.data();
       const count = data.ratingCount || 0;
       return { id: d.id, ...data, rating: count ? (data.ratingSum || 0) / count : null };
-    });
+    })
+      // lugares zerados por uma troca de endereço não aparecem mais
+      .filter((p) => (p.visits ?? 1) > 0);
     list.sort((a, b) => (b.visits || 0) - (a.visits || 0));
     cb(list);
   }, () => cb([]));

@@ -11,7 +11,7 @@ import { pickPlace } from "./place-picker.js";
 
 import {
   MEALS, mealById, CUISINES, cuisineById,
-  formatPoints, formatMoney, formatRating, guessWinner, basePoints,
+  formatPoints, formatMoney, formatRating, guessWinners, basePoints,
 } from "../food.js";
 
 const EMOJIS = ["🔥", "😍", "🤤", "👏", "😂", "🤮", "💀", "🐐"];
@@ -443,7 +443,7 @@ export function postView({ cid, pid }) {
     const guesses = post.guesses || {};
     const myGuess = guesses[myUid];
     const revealed = isMine || myGuess != null;
-    const winner = guessWinner(guesses, post.price);
+    const campeoes = new Set(guessWinners(guesses, post.price).map((g) => g.uid));
 
     if (!revealed) {
       return `
@@ -464,13 +464,17 @@ export function postView({ cid, pid }) {
       <div class="card guess-card">
         <div class="guess-title">💸 Custou <strong>${formatMoney(post.price)}</strong></div>
         ${list.length ? `<div class="guess-list">
-          ${list.map(([u, v], i) => `
-            <div class="guess-item ${i === 0 ? "win" : ""}">
+          ${list.map(([u, v]) => `
+            <div class="guess-item ${campeoes.has(u) ? "win" : ""}">
               <span class="who">${u === myUid ? "Você" : esc(nameOf(u))}</span>
               <span class="val">${formatMoney(v)}</span>
-              <span class="off">${i === 0 && winner ? "🏆" : `${v > post.price ? "+" : "−"}${formatMoney(Math.abs(v - post.price)).replace("R$", "").trim()}`}</span>
+              <span class="off">${campeoes.has(u)
+                ? "🏆"
+                : `${v > post.price ? "+" : "−"}${formatMoney(Math.abs(v - post.price)).replace("R$", "").trim()}`}</span>
             </div>`).join("")}
-        </div>` : `<div class="hint-row">Ninguém chutou ainda.</div>`}
+        </div>
+        ${campeoes.size > 1 ? `<div class="hint-row">Empate: ${campeoes.size} palpites na mesma distância.</div>` : ""}`
+        : `<div class="hint-row">Ninguém chutou ainda.</div>`}
       </div>`;
   };
 
@@ -491,7 +495,7 @@ export function postView({ cid, pid }) {
         ${avatar({ name: post.authorName, photo: post.authorPhoto }, "md")}
         <div class="who">
           <div class="name">${esc(post.authorName)}</div>
-          <div class="when">${esc(fullWhen(post.at))}</div>
+          <div class="when">${esc(fullWhen(store.postTime(post)))}</div>
         </div>
         <button class="topbar-btn" data-profile>${icon("details", 22)}</button>
       </div>
@@ -503,7 +507,9 @@ export function postView({ cid, pid }) {
           <b class="pts">+${formatPoints(basePoints(post.homemade))}</b></span>
         ${cuisine ? `<span class="meta-chip">${cuisine.emoji} ${cuisine.label}</span>` : ""}
         ${meal ? `<span class="meta-chip">${meal.emoji} ${meal.label}</span>` : ""}
-        ${post.place ? `<span class="meta-chip">${icon("pin", 16)} ${esc(post.place)}</span>` : ""}
+        ${post.place || post.coords
+          ? `<span class="meta-chip">${icon("pin", 16)} ${esc(post.place || "Marcado no mapa")}</span>`
+          : ""}
         ${Object.entries(reactions).map(([emoji, uids]) => `
           <button class="meta-chip" data-react="${esc(emoji)}"
                   style="${uids.includes(store.uid()) ? "box-shadow:0 0 0 1.5px var(--red)" : ""}">
