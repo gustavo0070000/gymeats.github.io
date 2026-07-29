@@ -227,7 +227,7 @@ export async function loadPhoto(photoId) {
 
 export async function createPost(cid, {
   title, description, mealType, cuisine, homemade, place, coords, price,
-  photo, thumb, at,
+  photo, thumb, at, dateEditada = false,
 }) {
   const u = me();
   const when = at ? toDate(at) : new Date();
@@ -271,6 +271,9 @@ export async function createPost(cid, {
       photoId,
       dayKey: key,
       at: when,
+      // Marca quando a data foi escolhida de propósito. Sem isso, uma data
+      // muito distante da hora da publicação é tratada como relógio errado.
+      dateEditada,
       createdAt: serverTimestamp(),
       commentCount: 0,
       reactions: {},
@@ -303,10 +306,21 @@ export async function createPost(cid, {
  * inválida (post antigo, data digitada errada), cai pro carimbo do servidor.
  */
 export function postTime(p) {
-  const chosen = toDate(p?.at);
-  if (chosen && !isNaN(chosen)) return chosen;
-  const created = toDate(p?.createdAt);
-  return created && !isNaN(created) ? created : new Date(0);
+  const escolhido = toDate(p?.at);
+  const servidor = toDate(p?.createdAt);
+  const okEscolhido = escolhido && !isNaN(escolhido);
+  const okServidor = servidor && !isNaN(servidor);
+
+  if (!okEscolhido) return okServidor ? servidor : new Date(0);
+  if (!okServidor) return escolhido;
+
+  // Quando as duas datas brigam por mais de 12 horas, vale a do servidor:
+  // a do formulário depende do relógio do aparelho de quem postou, e o
+  // campo de data podia vir preenchido com um valor velho restaurado pelo
+  // navegador. Quem quiser publicar a foto de outro dia de propósito usa o
+  // "Editar prato", que marca a escolha como intencional.
+  const brigaFeio = Math.abs(escolhido - servidor) >= 12 * 36e5;
+  return brigaFeio && !p?.dateEditada ? servidor : escolhido;
 }
 
 /** Dia do post derivado do horário — o campo dayKey serve só de reserva. */
@@ -351,6 +365,8 @@ export async function updatePost(cid, post, {
     price: isFinite(price) && price > 0 ? Number(price) : null,
     at: when,
     dayKey: dayKey(when),
+    // Data mexida à mão passa a valer sobre a do servidor.
+    dateEditada: true,
     basePoints: basePoints(homemade),
     editedAt: serverTimestamp(),
   });
@@ -441,6 +457,23 @@ export async function auditPosts(cid, max = 100) {
       suspeito: horas != null && horas >= 12,
     };
   });
+}
+
+/**
+ * Ajusta só a localização de um prato. Serve pro dono do desafio arrumar o
+ * lugar de um post alheio sem tocar em mais nada — é o único campo, além da
+ * data, que as regras deixam ele mexer fora dos próprios pratos.
+ */
+export async function updatePostPlace(cid, post, { place, coords }) {
+  const pKey = resolvePlaceKey(place, coords);
+  await updateDoc(doc(db, "challenges", cid, "posts", post.id), {
+    place: place || "",
+    placeKey: pKey,
+    coords: coords || null,
+  });
+  if (pKey) {
+    await touchPlace(cid, pKey, { place, coords, thumb: post.thumb, postId: post.id });
+  }
 }
 
 /** Regrava `at` e `dayKey` a partir do carimbo do servidor. */

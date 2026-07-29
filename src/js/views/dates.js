@@ -62,14 +62,20 @@ export function datesView({ cid }) {
       </div>
 
       ${tortos.length ? `
+        <div class="notice">
+          Esses ${tortos.length} pratos <strong>já aparecem no dia certo</strong>:
+          quando as duas datas brigam muito, o app passou a usar a do servidor
+          sozinho. O botão abaixo é só pra gravar a correção de vez no banco.
+        </div>
         <div class="pad">
           <button class="btn btn-primary" data-fix>
-            ${icon("refresh", 20)} Corrigir ${tortos.length} ${tortos.length === 1 ? "prato" : "pratos"}
+            ${icon("refresh", 20)} Gravar correção em ${tortos.length} ${tortos.length === 1 ? "prato" : "pratos"}
           </button>
         </div>
         <div class="pad hint-row">
-          A data escolhida é substituída pela do servidor, e o placar é
-          recalculado. As fotos, notas e comentários não são tocados.
+          Precisa das regras do Firestore atualizadas. Se der erro de
+          permissão, republique o firestore.rules — mas o feed já está certo
+          de qualquer forma.
         </div>` : `
         <div class="pad hint-row" style="color:var(--text)">
           Nenhuma data destoando. Se algum prato ainda aparece no dia errado,

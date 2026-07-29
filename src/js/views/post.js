@@ -178,14 +178,14 @@ export function composeView({ cid }) {
             <div class="card"><div class="field-inline">
               <div class="field-body">
                 <span class="field-label">Dia</span>
-                <input type="date" data-day value="${dayKey(now)}" style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
+                <input type="date" data-day autocomplete="off" value="${dayKey(now)}" style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
               </div>
               <span class="ico">${icon("calendar", 22)}</span>
             </div></div>
             <div class="card"><div class="field-inline">
               <div class="field-body">
                 <span class="field-label">Hora</span>
-                <input type="time" data-time value="${hhmm}" style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
+                <input type="time" data-time autocomplete="off" value="${hhmm}" style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
               </div>
               <span class="ico">${icon("clock", 22)}</span>
             </div></div>
@@ -238,6 +238,19 @@ export function composeView({ cid }) {
         </div>
       </div>
       <input type="file" accept="image/*" hidden data-file>`;
+
+    /* O Chrome restaura valores de formulário entre sessões, e o campo de
+       data chegava a vir preenchido com o dia em que o formulário foi
+       aberto pela última vez — foi assim que pratos publicados hoje
+       acabaram gravados com data de ontem ou anteontem. Reescrever o valor
+       aqui, já com o elemento no DOM, garante que ele reflita o agora. */
+    const campoDia = el.querySelector("[data-day]");
+    const campoHora = el.querySelector("[data-time]");
+    const agora = new Date();
+    campoDia.value = dayKey(agora);
+    campoHora.value = `${String(agora.getHours()).padStart(2, "0")}:${String(agora.getMinutes()).padStart(2, "0")}`;
+    const diaInicial = campoDia.value;
+    const horaInicial = campoHora.value;
 
     // tocar no ícone do card abre o seletor nativo de data/hora
     el.querySelectorAll(".field-inline .ico").forEach((ico) => {
@@ -305,9 +318,12 @@ export function composeView({ cid }) {
           compress(capturedFile, { maxEdge: PHOTO.maxEdge, maxBytes: PHOTO.maxBytes }),
           thumbnail(capturedFile),
         ]);
-        const day = el.querySelector("[data-day]").value;
-        const time = el.querySelector("[data-time]").value || "12:00";
+        const day = campoDia.value || dayKey(new Date());
+        const time = campoHora.value || "12:00";
+        // Só conta como escolha deliberada se a pessoa realmente mexeu.
+        const dateEditada = day !== diaInicial || time !== horaInicial;
         await store.createPost(cid, {
+          dateEditada,
           title,
           description: el.querySelector("[data-desc]").value.trim(),
           mealType: meal,
@@ -366,7 +382,7 @@ export function postView({ cid, pid }) {
   const input = el.querySelector("[data-input]");
   const sendBtn = el.querySelector("[data-send]");
 
-  let post = null, comments = [], fullPhoto = null, drawn = false, members = [];
+  let post = null, comments = [], fullPhoto = null, drawn = false, members = [], challenge = null;
   const nameOf = (u) => members.find((m) => m.uid === u)?.name || "alguém";
 
   el.querySelector("[data-back]").addEventListener("click", () => navigate(`/c/${cid}`));
@@ -547,12 +563,29 @@ export function postView({ cid, pid }) {
     composer.classList.remove("hidden");
 
     el.querySelector("[data-more]").onclick = async () => {
+      const souDono = challenge?.ownerUid === store.uid();
       const options = [{ label: "Ver perfil de " + post.authorName.split(" ")[0], value: "profile" }];
       if (isMine) options.push({ label: "Editar prato", value: "edit" });
+      // O dono do desafio arruma o local de prato alheio sem mexer no resto.
+      if (!isMine && souDono) options.push({ label: "📍 Ajustar localização", value: "place" });
       if (isMine) options.push({ label: "Apagar prato", value: "delete", danger: true });
+
       const choice = await sheet(post.title, options);
       if (choice === "profile") navigate(`/c/${cid}/u/${post.uid}`);
       if (choice === "edit") navigate(`/c/${cid}/p/${pid}/editar`);
+      if (choice === "place") {
+        const picked = await pickPlace({ name: post.place, coords: post.coords });
+        if (picked) {
+          try {
+            await store.updatePostPlace(cid, post, picked);
+            toast("Localização atualizada!");
+          } catch (err) {
+            toastError(err?.code === "permission-denied"
+              ? "Republique as regras do Firestore pra liberar isso."
+              : "Não deu pra salvar a localização.");
+          }
+        }
+      }
       if (choice === "delete" && await confirmSheet("Apagar esse prato?", "Apagar")) {
         try {
           await store.deletePost(cid, post);
@@ -602,8 +635,9 @@ export function postView({ cid, pid }) {
   });
   const b = store.watchComments(cid, pid, (c) => { comments = c; drawComments(); });
   const c = store.watchMembers(cid, (list) => { members = list; if (post) draw(); });
+  const d = store.watchChallenge(cid, (ch) => { challenge = ch; });
 
-  return { el, destroy: () => { a(); b(); c(); } };
+  return { el, destroy: () => { a(); b(); c(); d(); } };
 }
 
 /* ============================================================
