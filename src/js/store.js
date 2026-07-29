@@ -5,7 +5,7 @@ import {
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
 import {
-  pointsFor, basePoints, ratingAverage, placeKey, MIN_RATINGS,
+  pointsFor, basePoints, ratingAverage, placeKey, MIN_RATINGS, POINTS_BOUGHT,
 } from "./food.js";
 
 /* ============================================================
@@ -342,6 +342,18 @@ async function recountMember(cid, memberUid) {
   }, { merge: true });
 }
 
+/**
+ * Recalcula o placar de todo mundo a partir dos posts.
+ * Serve pra consertar desafios que começaram antes da pontuação existir
+ * (só o dono consegue, porque mexe na ficha dos outros membros).
+ */
+export async function recalcStandings(cid) {
+  const snap = await getDocs(collection(db, "challenges", cid, "members"));
+  const uids = snap.docs.map((d) => d.id);
+  for (const memberUid of uids) await recountMember(cid, memberUid);
+  return uids.length;
+}
+
 /** Posts de um mês específico — usado no calendário do perfil. */
 export async function monthPosts(cid, memberUid, year, month) {
   const p = (n) => String(n).padStart(2, "0");
@@ -592,9 +604,14 @@ export function standings(members, period, challenge, by = "days") {
   const rows = members.map((m) => {
     const days = (m.days || []).filter(inRange);
     const jokerDays = (m.jokerDays || []).filter(inRange);
-    const points = Object.entries(m.dayPoints || {})
-      .filter(([d]) => inRange(d))
-      .reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
+
+    // Percorre os DIAS, não o mapa de pontos: posts criados antes da
+    // pontuação existir não têm entrada em dayPoints, e sem esse
+    // fallback o placar inteiro apareceria zerado.
+    const scored = m.dayPoints || {};
+    const points = days.reduce(
+      (sum, d) => sum + (Number(scored[d]) || POINTS_BOUGHT), 0);
+
     return { ...m, count: days.length, days, jokerDays, points };
   });
 

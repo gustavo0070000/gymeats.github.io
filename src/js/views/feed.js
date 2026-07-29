@@ -346,9 +346,35 @@ export async function editChallengeView({ cid }) {
             <input type="date" data-end value="${iso(challenge.endDate)}">
           </label></div>
         </div>
+
+        <div class="gap"></div>
+        <div class="card list-card">
+          <button class="list-row" data-recalc>
+            <span class="ico">${icon("refresh", 22)}</span>
+            <span class="label">Recalcular placar</span>
+          </button>
+        </div>
+        <div class="pad hint-row">
+          Refaz pontos, passaporte e contagens a partir dos pratos já postados.
+          Use se o desafio começou antes da pontuação existir.
+        </div>
       </div>
       <input type="file" accept="image/*" hidden data-file>
     </div>`);
+
+  el.querySelector("[data-recalc]").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.querySelector(".label").textContent = "Recalculando…";
+    try {
+      const n = await store.recalcStandings(cid);
+      toast(`Placar refeito para ${n} ${n === 1 ? "pessoa" : "pessoas"}.`);
+    } catch {
+      toastError("Não deu pra recalcular.");
+    }
+    btn.disabled = false;
+    btn.querySelector(".label").textContent = "Recalcular placar";
+  });
 
   /* ---- troca da capa ---- */
   const fileInput = el.querySelector("[data-file]");
