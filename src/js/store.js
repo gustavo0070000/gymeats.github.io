@@ -294,9 +294,35 @@ export async function createPost(cid, {
   return postRef.id;
 }
 
-export function watchFeed(cid, cb, max = 40) {
+/**
+ * Momento do post, resolvido com tolerância.
+ * `at` é a data que a pessoa escolheu no formulário; se vier faltando ou
+ * inválida (post antigo, data digitada errada), cai pro carimbo do servidor.
+ */
+export function postTime(p) {
+  const chosen = toDate(p?.at);
+  if (chosen && !isNaN(chosen)) return chosen;
+  const created = toDate(p?.createdAt);
+  return created && !isNaN(created) ? created : new Date(0);
+}
+
+/** Dia do post derivado do horário — o campo dayKey serve só de reserva. */
+export function postDay(p) {
+  const when = postTime(p);
+  return when.getTime() ? dayKey(when) : (p?.dayKey || "");
+}
+
+/** Mais recente primeiro. */
+export const byNewest = (a, b) => postTime(b) - postTime(a);
+
+export function watchFeed(cid, cb, max = 60) {
   const q = query(collection(db, "challenges", cid, "posts"), orderBy("at", "desc"), limit(max));
-  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
+  return onSnapshot(q, (snap) => {
+    // O Firestore ordena por tipo antes de valor: se algum post tiver `at`
+    // gravado num tipo diferente, a ordem volta embaralhada. Reordenamos
+    // aqui pra garantir "mais recente em cima", venha o que vier.
+    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest));
+  }, () => cb([]));
 }
 
 export function watchPost(cid, pid, cb) {
@@ -321,7 +347,7 @@ async function recountMember(cid, memberUid) {
   const snap = await getDocs(q);
   const posts = snap.docs.map((d) => d.data());
 
-  const days = [...new Set(posts.map((p) => p.dayKey))].sort();
+  const days = [...new Set(posts.map(postDay).filter(Boolean))].sort();
   const cuisines = [...new Set(posts.map((p) => p.cuisine).filter(Boolean))];
   const homemadeCount = posts.filter((p) => p.homemade).length;
 
@@ -329,7 +355,7 @@ async function recountMember(cid, memberUid) {
   const daySet = new Set(days);
   const dayPoints = {};
   for (const day of days) {
-    const best = Math.max(...posts.filter((p) => p.dayKey === day).map((p) => (p.homemade ? 2 : 1)));
+    const best = Math.max(...posts.filter((p) => postDay(p) === day).map((p) => (p.homemade ? 2 : 1)));
     const [y, m, d] = day.split("-").map(Number);
     dayPoints[day] = pointsFor(best === 2, streakFrom(daySet, new Date(y, m - 1, d)));
   }
@@ -505,7 +531,7 @@ export async function periodPosts(cid, start, end, max = 500) {
     limit(max),
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
 }
 
 /** Melhores e piores pratos de uma lista, respeitando o mínimo de votos. */

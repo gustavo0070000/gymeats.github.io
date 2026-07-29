@@ -87,7 +87,7 @@ export function feedView({ cid }) {
     const el2 = headerEl.querySelector("[data-counter]");
     if (!el2 || posts === null) return;
     const today = dayKey();
-    const todayCount = posts.filter((p) => p.dayKey === today).length;
+    const todayCount = posts.filter((p) => store.postDay(p) === today).length;
     const mine = members.find((m) => m.uid === store.uid());
     const total = members.reduce((s, m) => s + (m.total || 0), 0);
 
@@ -110,12 +110,18 @@ export function feedView({ cid }) {
       return;
     }
 
-    const groups = [];
+    // Um grupo por dia, na ordem em que os dias aparecem. Antes o grupo era
+    // "corrida de iguais consecutivos", então qualquer post fora de ordem
+    // fazia "Hoje" e "Ontem" se repetirem várias vezes na tela.
+    const byDay = new Map();
     posts.forEach((p) => {
-      const key = p.dayKey || "";
-      if (!groups.length || groups[groups.length - 1].key !== key) groups.push({ key, items: [] });
-      groups[groups.length - 1].items.push(p);
+      const key = store.postDay(p);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(p);
     });
+    const groups = [...byDay.entries()]
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([key, items]) => ({ key, items: items.sort(store.byNewest) }));
 
     postsEl.innerHTML = groups.map((g) => `
       <div class="section-label">${esc(dayLabel(g.key))}</div>
@@ -131,7 +137,7 @@ export function feedView({ cid }) {
               <span>${esc(p.authorName || "")}</span>
             </div>
           </div>
-          <div class="checkin-time">${esc(timeLabel(p.at))}</div>
+          <div class="checkin-time">${esc(timeLabel(store.postTime(p)))}</div>
         </button>`).join("")}
     `).join("");
   };
