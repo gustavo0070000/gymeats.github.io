@@ -52,8 +52,11 @@ async function destinatarios(uids, tipo) {
  * service worker do app, senão o navegador desenharia sozinho.
  * Token recusado pelo Firebase é apagado na hora.
  */
-async function enviar(alvos, payload) {
-  if (!alvos.length) return 0;
+async function enviar(alvos, payload, registro = null) {
+  if (!alvos.length) {
+    if (registro) await anotar({ ...registro, payload, enviadas: 0, alvos: 0 });
+    return 0;
+  }
 
   const dados = {};
   for (const [k, v] of Object.entries(payload)) {
@@ -80,7 +83,40 @@ async function enviar(alvos, payload) {
     db.doc(`users/${m.uid}/pushTokens/${m.docId}`).delete().catch(() => {})));
 
   console.log(`enviadas ${resultado.successCount}/${alvos.length}, limpos ${mortos.length}`);
+
+  if (registro) {
+    await anotar({
+      ...registro,
+      payload,
+      alvos: alvos.length,
+      enviadas: resultado.successCount,
+      falhas: alvos.length - resultado.successCount,
+      limpos: mortos.length,
+    });
+  }
   return resultado.successCount;
+}
+
+/**
+ * Guarda o que foi disparado, pra dar pra conferir dentro do app em vez de
+ * precisar abrir o log do Cloud. Fica junto do desafio, então a mesma regra
+ * de quem enxerga o desafio vale aqui. A imagem não entra: é base64 e só
+ * incharia o documento.
+ */
+async function anotar({ cid, tipo, payload, alvos = 0, enviadas = 0, falhas = 0, limpos = 0 }) {
+  if (!cid) return;
+  try {
+    await db.collection(`challenges/${cid}/notifications`).add({
+      tipo,
+      title: payload.title || "",
+      body: (payload.body || "").slice(0, 200),
+      url: payload.url || "",
+      alvos, enviadas, falhas, limpos,
+      at: FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("não consegui anotar o envio:", err);
+  }
 }
 
 const primeiroNome = (nome) => String(nome || "Alguém").trim().split(/\s+/)[0];
@@ -117,7 +153,7 @@ exports.aoPostarPrato = onDocumentCreated(
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    });
+    }, { cid, tipo: "posts" });
   });
 
 /* ============================================================
@@ -142,7 +178,7 @@ exports.aoComentar = onDocumentCreated(
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    });
+    }, { cid, tipo: "comments" });
   });
 
 /* ============================================================
@@ -176,7 +212,7 @@ exports.aoDarNota = onDocumentUpdated(
       image: imagemDoPrato(depois),
       tag: `post-${pid}`,
       url: `/#/c/${cid}/p/${pid}`,
-    });
+    }, { cid, tipo: "ratings" });
   });
 
 /* ============================================================
@@ -236,7 +272,7 @@ async function mandarRecap(periodo, de, ate, titulo) {
         + `${campeao.dias} ${campeao.dias === 1 ? "dia" : "dias"}${segundo}`,
       tag: `recap-${periodo}-${cid}`,
       url: `/#/c/${cid}/recap`,
-    });
+    }, { cid, tipo: "recaps" });
   }
 }
 

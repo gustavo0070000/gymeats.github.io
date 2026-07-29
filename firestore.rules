@@ -123,6 +123,14 @@ service cloud.firestore {
         allow delete: if isOwner(cid);
       }
 
+      // ---------- Histórico de notificações ----------
+      // Quem escreve são as Cloud Functions, pelo Admin SDK. Do app é só
+      // leitura, e só pra quem é do desafio.
+      match /notifications/{logId} {
+        allow read: if isMember(cid);
+        allow write: if false;
+      }
+
       // ---------- Bate-papo ----------
       match /messages/{mid} {
         allow read: if isMember(cid);

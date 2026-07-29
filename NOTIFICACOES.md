@@ -149,6 +149,30 @@ alerta por e-mail.
 
 ---
 
+## Ver o que foi disparado
+
+Dentro do app: **Editar desafio → Notificações enviadas**. Cada envio
+aparece com o texto que foi mandado e quantos aparelhos receberam, além
+de um resumo de hoje e do total.
+
+"Aparelhos" conta celulares e navegadores registrados, não pessoas —
+quem usa o app no celular e no computador conta duas vezes.
+
+Envio com **"nenhum destinatário"** quer dizer que ninguém elegível tinha
+notificação ligada: ou ainda não ligaram, ou desligaram aquele tipo.
+
+Pelo terminal, o mesmo dado em formato técnico:
+
+```bash
+firebase functions:log --project ogusamaaisa
+```
+
+Cada disparo sai como `enviadas 3/4, limpos 1`.
+
+E no console do Firebase: **Functions** → aba **Registros** mostra a mesma
+coisa com filtro por função; **Analytics do Messaging** traz números
+agregados de entrega, com um dia de atraso.
+
 ## Se algo não chegar
 
 1. **Confira a chave** — sem o passo 1 o botão de ligar recusa e diz o porquê.

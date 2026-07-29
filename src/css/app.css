@@ -1564,3 +1564,42 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
 }
 .switch.on { background: var(--red); }
 .switch.on i { transform: translateX(18px); }
+
+/* ============================================================
+   Histórico de notificações enviadas
+   ============================================================ */
+
+.sent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+.sent-row:last-child { border-bottom: none; }
+.sent-row:active { background: #FAFAFA; }
+.sent-emoji { font-size: 20px; line-height: 1.2; flex: 0 0 auto; }
+.sent-main { flex: 1; min-width: 0; }
+.sent-title {
+  display: block;
+  font-size: 16px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sent-body {
+  display: block;
+  font-size: 14px; font-weight: 600; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-top: 1px;
+}
+.sent-meta {
+  display: block;
+  font-size: 12px; font-weight: 700; color: var(--text-3);
+  margin-top: 3px;
+}
+.sent-when {
+  flex: 0 0 auto;
+  font-size: 13px; font-weight: 600; color: var(--text-3);
+  padding-top: 2px;
+}

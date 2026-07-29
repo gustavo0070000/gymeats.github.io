@@ -673,6 +673,18 @@ export function watchPlaces(cid, cb) {
   }, () => cb([]));
 }
 
+/* ---------- Histórico de notificações disparadas ---------- */
+
+/** Escrito pelas Cloud Functions; o app só lê. */
+export function watchNotificationLog(cid, cb, max = 80) {
+  const q = query(
+    collection(db, "challenges", cid, "notifications"),
+    orderBy("at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
+}
+
 /* ---------- Posts de um período (recap, prato da semana, guia) ---------- */
 
 export async function periodPosts(cid, start, end, max = 500) {
