@@ -128,3 +128,15 @@ export function placeKey(name) {
     .replace(/^-|-$/g, "")
     .slice(0, 60);
 }
+
+/** Chave a partir da coordenada, pra quando o lugar não tem nome.
+    Três casas decimais ≈ 100 m, o suficiente pra agrupar o mesmo lugar. */
+export function coordKey({ lat, lng } = {}) {
+  if (!isFinite(lat) || !isFinite(lng)) return "";
+  return `geo-${Number(lat).toFixed(3)}-${Number(lng).toFixed(3)}`.replace(/\./g, "_");
+}
+
+/** A chave de um lugar: o nome quando existe, senão a coordenada. */
+export function resolvePlaceKey(name, coords) {
+  return placeKey(name) || coordKey(coords || {});
+}

@@ -3,7 +3,7 @@
 // e instantaneamente; os dados vêm do Firestore, que tem o próprio cache
 // em IndexedDB. Nunca cacheamos chamadas de rede do Firebase.
 
-const VERSION = "v5";
+const VERSION = "v6";
 const SHELL = `gymeats-shell-${VERSION}`;
 
 const SHELL_FILES = [
@@ -42,6 +42,11 @@ self.addEventListener("install", (event) => {
       .then(() => self.skipWaiting())
       .catch(() => self.skipWaiting())
   );
+});
+
+// A página pede pra versão nova assumir sem esperar todas as abas fecharem.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

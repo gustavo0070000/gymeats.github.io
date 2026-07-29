@@ -548,9 +548,11 @@ export function postView({ cid, pid }) {
 
     el.querySelector("[data-more]").onclick = async () => {
       const options = [{ label: "Ver perfil de " + post.authorName.split(" ")[0], value: "profile" }];
+      if (isMine) options.push({ label: "Editar prato", value: "edit" });
       if (isMine) options.push({ label: "Apagar prato", value: "delete", danger: true });
       const choice = await sheet(post.title, options);
       if (choice === "profile") navigate(`/c/${cid}/u/${post.uid}`);
+      if (choice === "edit") navigate(`/c/${cid}/p/${pid}/editar`);
       if (choice === "delete" && await confirmSheet("Apagar esse prato?", "Apagar")) {
         try {
           await store.deletePost(cid, post);
@@ -602,4 +604,191 @@ export function postView({ cid, pid }) {
   const c = store.watchMembers(cid, (list) => { members = list; if (post) draw(); });
 
   return { el, destroy: () => { a(); b(); c(); } };
+}
+
+/* ============================================================
+   Editar um prato já publicado
+   ============================================================ */
+
+export async function editPostView({ cid, pid }) {
+  const post = await new Promise((resolve) => {
+    const stop = store.watchPost(cid, pid, (p) => { stop(); resolve(p); });
+  });
+
+  if (!post) {
+    return { el: h(`<div class="empty"><strong>Prato não encontrado</strong></div>`) };
+  }
+  if (post.uid !== store.uid()) {
+    return { el: h(`<div class="empty"><strong>Só quem postou pode editar</strong></div>`) };
+  }
+
+  const when = store.postTime(post);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const dayValue = `${when.getFullYear()}-${p2(when.getMonth() + 1)}-${p2(when.getDate())}`;
+  const timeValue = `${p2(when.getHours())}:${p2(when.getMinutes())}`;
+
+  const el = h(`
+    <div class="screen">
+      ${topbar({
+        left: `<button class="topbar-btn" data-back>${icon("back")}</button>`,
+        title: "Editar prato",
+        right: `<button class="topbar-action" data-save>Salvar</button>`,
+      })}
+      <div class="screen-body no-tabbar">
+        <div class="gap-sm"></div>
+
+        <div class="card">
+          <label class="field">
+            <span class="field-label">Título</span>
+            <input data-title value="${esc(post.title || "")}" maxlength="80">
+          </label>
+          <label class="field">
+            <span class="field-label">Descrição</span>
+            <textarea data-desc maxlength="600">${esc(post.description || "")}</textarea>
+          </label>
+        </div>
+
+        <div class="row-2">
+          <div class="card"><div class="field-inline">
+            <div class="field-body">
+              <span class="field-label">Dia</span>
+              <input type="date" data-day value="${dayValue}"
+                     style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
+            </div>
+            <span class="ico">${icon("calendar", 22)}</span>
+          </div></div>
+          <div class="card"><div class="field-inline">
+            <div class="field-body">
+              <span class="field-label">Hora</span>
+              <input type="time" data-time value="${timeValue}"
+                     style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
+            </div>
+            <span class="ico">${icon("clock", 22)}</span>
+          </div></div>
+        </div>
+
+        <div class="card">
+          <div class="toggle-row" data-homemade-row>
+            <button class="toggle-opt ${post.homemade ? "" : "active"}" data-homemade="0">🛒 Comprei<span>1 ponto</span></button>
+            <button class="toggle-opt ${post.homemade ? "active" : ""}" data-homemade="1">👨‍🍳 Cozinhei<span>2 pontos</span></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <button class="field-inline place-btn" data-place-pick style="width:100%;text-align:left">
+            <span class="ico">${icon("pin", 22)}</span>
+            <span class="field-body">
+              <span class="place-name ${post.place ? "filled" : ""}" data-place-label>${esc(post.place || "Onde foi? (opcional)")}</span>
+              <span class="place-sub ${post.coords ? "" : "hidden"}" data-place-sub>📍 marcado no mapa</span>
+            </span>
+            <span class="chev">${icon("chevron", 18)}</span>
+          </button>
+        </div>
+
+        <div class="card"><div class="field-inline">
+          <span class="ico" style="font-size:20px">💸</span>
+          <div class="field-body">
+            <span class="field-label">Quanto custou?</span>
+            <input data-price type="number" inputmode="decimal" min="0" step="0.01"
+                   value="${post.price ?? ""}" placeholder="R$ —"
+                   style="border:none;outline:none;background:transparent;font-size:17px;font-weight:600;width:100%">
+          </div>
+        </div></div>
+
+        <div class="card">
+          <div class="field-label" style="padding:14px 16px 0">Refeição</div>
+          <div class="chip-wrap" data-meals>
+            ${MEALS.map((m) => `<button class="chip ${m.id === post.mealType ? "active" : ""}" data-meal="${m.id}">${m.emoji} ${m.label}</button>`).join("")}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field-label" style="padding:14px 16px 0">Cozinha</div>
+          <div class="chip-wrap scroll" data-cuisines>
+            ${CUISINES.map((c) => `<button class="chip ${c.id === post.cuisine ? "active" : ""}" data-cuisine="${c.id}">${c.emoji} ${c.label}</button>`).join("")}
+          </div>
+        </div>
+
+        <div class="gap"></div>
+      </div>
+    </div>`);
+
+  let meal = post.mealType || "";
+  let cuisine = post.cuisine || "";
+  let homemade = !!post.homemade;
+  let place = post.place || "";
+  let coords = post.coords || null;
+
+  const chipGroup = (sel, attr, get, set) => {
+    el.querySelector(sel).addEventListener("click", (e) => {
+      const btn = e.target.closest(`[data-${attr}]`);
+      if (!btn) return;
+      set(btn.dataset[attr] === get() ? "" : btn.dataset[attr]);
+      el.querySelectorAll(`[data-${attr}]`).forEach((b) =>
+        b.classList.toggle("active", b.dataset[attr] === get()));
+    });
+  };
+  chipGroup("[data-meals]", "meal", () => meal, (v) => (meal = v));
+  chipGroup("[data-cuisines]", "cuisine", () => cuisine, (v) => (cuisine = v));
+
+  el.querySelector("[data-homemade-row]").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-homemade]");
+    if (!btn) return;
+    homemade = btn.dataset.homemade === "1";
+    el.querySelectorAll("[data-homemade]").forEach((b) =>
+      b.classList.toggle("active", (b.dataset.homemade === "1") === homemade));
+  });
+
+  el.querySelector("[data-place-pick]").addEventListener("click", async () => {
+    const picked = await pickPlace({ name: place, coords });
+    if (!picked) return;
+    place = picked.name;
+    coords = picked.coords;
+    const label = el.querySelector("[data-place-label]");
+    label.textContent = place || "Onde foi? (opcional)";
+    label.classList.toggle("filled", !!place);
+    el.querySelector("[data-place-sub]").classList.toggle("hidden", !coords);
+  });
+
+  el.querySelectorAll(".field-inline .ico").forEach((ico) => {
+    ico.addEventListener("click", () => {
+      const field = ico.parentElement.querySelector("input");
+      if (field?.showPicker) { try { field.showPicker(); return; } catch { /* segue */ } }
+      field?.focus();
+    });
+  });
+
+  el.querySelector("[data-back]").addEventListener("click", () => navigate(`/c/${cid}/p/${pid}`));
+
+  el.querySelector("[data-save]").addEventListener("click", async (e) => {
+    const title = el.querySelector("[data-title]").value.trim();
+    if (!title) return toastError("O prato precisa de um título.");
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "Salvando…";
+    try {
+      const day = el.querySelector("[data-day]").value;
+      const time = el.querySelector("[data-time]").value || "12:00";
+      await store.updatePost(cid, post, {
+        title,
+        description: el.querySelector("[data-desc]").value.trim(),
+        mealType: meal,
+        cuisine,
+        homemade,
+        place,
+        coords,
+        price: parseFloat(el.querySelector("[data-price]").value),
+        at: new Date(`${day}T${time}:00`),
+      });
+      toast("Prato atualizado!");
+      navigate(`/c/${cid}/p/${pid}`, { replace: true });
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Salvar";
+      toastError("Não deu pra salvar.");
+      console.error(err);
+    }
+  });
+
+  return { el };
 }

@@ -4,7 +4,7 @@ import { configured, loginWithGoogle, logout } from "../firebase.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
 import { compress } from "../image.js";
-import { PHOTO, APP_NAME } from "../config.js";
+import { PHOTO, APP_NAME, APP_VERSION } from "../config.js";
 
 const LAST_KEY = "gymeats:last-challenge";
 export const lastChallenge = () => localStorage.getItem(LAST_KEY);
@@ -390,6 +390,9 @@ export function accountView() {
         <button class="list-row danger" data-logout>
           <span class="ico">${icon("exit", 22)}</span><span class="label">Sair da conta</span>
         </button>
+      </div>
+      <div class="pad center muted" style="font-size:13px;padding-top:16px">
+        ${APP_NAME} ${APP_VERSION}
       </div>`;
 
     body.querySelector("[data-photo]").addEventListener("click", () => fileInput.click());

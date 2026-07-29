@@ -7,7 +7,7 @@ import {
   loginView, homeView, newChallengeView, joinView, inviteView, accountView, lastChallenge,
 } from "./views/home.js";
 import { feedView, detailsView, editChallengeView } from "./views/feed.js";
-import { composeView, postView } from "./views/post.js";
+import { composeView, postView, editPostView } from "./views/post.js";
 import { rankingsView } from "./views/rankings.js";
 import { chatView } from "./views/chat.js";
 import { profileView } from "./views/profile.js";
@@ -49,6 +49,7 @@ route("/c/:cid/editar", guard(editChallengeView));
 route("/c/:cid/guia", guard(guideView));
 route("/c/:cid/recap", guard(recapView));
 route("/c/:cid/p/:pid", guard(postView));
+route("/c/:cid/p/:pid/editar", guard(editPostView));
 route("/c/:cid/u/:uid", guard(profileView));
 
 setNotFound(() => ({
@@ -96,7 +97,34 @@ boot();
 /* ---------- PWA ---------- */
 
 if ("serviceWorker" in navigator) {
-  addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  addEventListener("load", async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("./sw.js");
+
+      // Versão nova disponível: assume na hora e recarrega uma vez só.
+      // Sem isso dá pra ficar preso numa versão antiga sem perceber, e
+      // fica impossível saber qual código está rodando de verdade.
+      reg.addEventListener("updatefound", () => {
+        const novo = reg.installing;
+        novo?.addEventListener("statechange", () => {
+          if (novo.state === "installed" && navigator.serviceWorker.controller) {
+            novo.postMessage({ type: "SKIP_WAITING" });
+          }
+        });
+      });
+
+      let recarregando = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (recarregando) return;
+        recarregando = true;
+        location.reload();
+      });
+
+      // procura versão nova ao abrir e sempre que o app volta pro primeiro plano
+      reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") reg.update().catch(() => {});
+      });
+    } catch { /* sem service worker, o app funciona igual */ }
   });
 }

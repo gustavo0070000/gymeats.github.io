@@ -76,6 +76,28 @@ async function fromNominatim(term, near) {
   })).filter((r) => r.name);
 }
 
+/** Descobre o nome do lugar a partir da coordenada (o caminho inverso). */
+export async function describePoint({ lat, lng }) {
+  try {
+    const params = new URLSearchParams({
+      format: "jsonv2", lat, lon: lng, zoom: "18", "accept-language": "pt-BR",
+    });
+    const res = await fetch(`${NOMINATIM.replace("/search", "/reverse")}?${params}`,
+      { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("reverse");
+    const r = await res.json();
+    const a = r.address || {};
+    const nome = r.name
+      || [a.road, a.house_number].filter(Boolean).join(", ")
+      || a.suburb || a.neighbourhood || a.city_district || a.city || a.town || a.village;
+    const detalhe = [a.suburb || a.neighbourhood, a.city || a.town || a.village, a.state]
+      .filter(Boolean).join(" · ");
+    return { name: nome || "", detail: detalhe };
+  } catch {
+    return { name: "", detail: "" };
+  }
+}
+
 const distance = (a, b) => (!a || !b ? Infinity : Math.hypot(a.lat - b.lat, a.lng - b.lng));
 
 // Lugar de comer aparece antes de rua, bairro e cidade — é um app de comida.
@@ -179,7 +201,7 @@ export function pickPlace(initial = {}) {
         }).addTo(map);
         map.setView(coords ? [coords.lat, coords.lng] : [-23.5505, -46.6333], coords ? 16 : 11);
         map.on("click", (e) => setPoint({ lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) }));
-        if (coords) setPoint(coords, false);
+        if (coords) setPoint(coords, false, false);
         setTimeout(() => map.invalidateSize(), 60);
         if (!coords) centerOnUserIfAllowed();
         return map;
@@ -211,8 +233,24 @@ export function pickPlace(initial = {}) {
       );
     }
 
-    function setPoint(point, recenter = true) {
+    /* Marcou um ponto sem ter digitado nome? Descobrimos o endereço, senão
+       o lugar não teria como aparecer no guia nem no mapa do grupo. */
+    async function fillNameFromPoint(point) {
+      if (input.value.trim()) return;
+      input.placeholder = "Descobrindo o endereço…";
+      const { name: found } = await describePoint(point);
+      input.placeholder = "Buscar restaurante ou endereço";
+      if (found && !input.value.trim()) {
+        name = found;
+        input.value = found;
+        clearBtn.classList.remove("hidden");
+        renderFoot();
+      }
+    }
+
+    function setPoint(point, recenter = true, lookup = true) {
       coords = point;
+      if (lookup) fillNameFromPoint(point);
       const L = window.L;
       if (!map || !L) return renderFoot();
       const latlng = [point.lat, point.lng];

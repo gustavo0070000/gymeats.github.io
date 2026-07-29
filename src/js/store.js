@@ -5,7 +5,7 @@ import {
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
 import {
-  pointsFor, basePoints, ratingAverage, placeKey, MIN_RATINGS, POINTS_BOUGHT,
+  pointsFor, basePoints, ratingAverage, resolvePlaceKey, MIN_RATINGS, POINTS_BOUGHT,
 } from "./food.js";
 
 /* ============================================================
@@ -232,7 +232,10 @@ export async function createPost(cid, {
   const u = me();
   const when = at ? toDate(at) : new Date();
   const key = dayKey(when);
-  const pKey = place ? placeKey(place) : "";
+  // Marcar o ponto no mapa sem digitar nome também vale: a coordenada vira
+  // a chave. Antes, sem nome o lugar simplesmente não era registrado, e a
+  // localização sumia do guia e do mapa.
+  const pKey = resolvePlaceKey(place, coords);
 
   const photoId = photo ? await savePhoto(photo, cid) : null;
 
@@ -323,6 +326,39 @@ export function watchFeed(cid, cb, max = 60) {
     // aqui pra garantir "mais recente em cima", venha o que vier.
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest));
   }, () => cb([]));
+}
+
+/**
+ * Edita um prato já publicado. Só o autor pode.
+ * Mexer na data ou no "cozinhei" muda o placar, então o membro é recontado
+ * no fim — é o mesmo caminho do "Recalcular placar".
+ */
+export async function updatePost(cid, post, {
+  title, description, mealType, cuisine, homemade, place, coords, price, at,
+}) {
+  const when = at ? toDate(at) : postTime(post);
+  const pKey = resolvePlaceKey(place, coords);
+
+  await updateDoc(doc(db, "challenges", cid, "posts", post.id), {
+    title: title ?? post.title,
+    description: description ?? post.description,
+    mealType: mealType ?? post.mealType,
+    cuisine: cuisine ?? post.cuisine,
+    homemade: !!homemade,
+    place: place || "",
+    placeKey: pKey,
+    coords: coords || null,
+    price: isFinite(price) && price > 0 ? Number(price) : null,
+    at: when,
+    dayKey: dayKey(when),
+    basePoints: basePoints(homemade),
+    editedAt: serverTimestamp(),
+  });
+
+  if (pKey) {
+    await touchPlace(cid, pKey, { place, coords, thumb: post.thumb, postId: post.id });
+  }
+  await recountMember(cid, post.uid);
 }
 
 export function watchPost(cid, pid, cb) {
@@ -497,7 +533,7 @@ export async function useJoker(cid, day) {
 async function touchPlace(cid, key, { place, coords, thumb, postId }) {
   const ref = doc(db, "challenges", cid, "places", key);
   const patch = {
-    name: place,
+    name: place || "Ponto no mapa",
     visits: increment(1),
     uids: arrayUnion(uid()),
     lastAt: serverTimestamp(),
@@ -641,12 +677,21 @@ export function standings(members, period, challenge, by = "days") {
     return { ...m, count: days.length, days, jokerDays, points };
   });
 
+  // Empate em pontos é resolvido por quem apareceu em mais dias, depois por
+  // quem tem a sequência maior. O nome só decide em último caso — antes,
+  // quem vinha primeiro no alfabeto liderava mesmo tendo postado menos.
   const value = (r) => (by === "points" ? r.points : r.count);
-  rows.sort((a, b) => value(b) - value(a) || a.name.localeCompare(b.name, "pt-BR"));
+  rows.sort((a, b) =>
+    value(b) - value(a)
+    || b.count - a.count
+    || memberStreak(b) - memberStreak(a)
+    || (b.total || 0) - (a.total || 0)
+    || a.name.localeCompare(b.name, "pt-BR"));
 
+  // Só divide a posição quem empatou de verdade: mesmos pontos E mesmos dias.
   let last = null, lastPos = 0;
   rows.forEach((row, i) => {
-    const v = value(row);
+    const v = `${value(row)}|${row.count}`;
     if (v !== last) { lastPos = i + 1; last = v; }
     row.position = lastPos;
   });
