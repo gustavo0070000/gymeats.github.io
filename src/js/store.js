@@ -792,7 +792,7 @@ export function periodRange(period, challenge) {
     end.setMonth(11, 31);
   } else {
     return {
-      start: toDate(challenge?.startDate) || new Date(2000, 0, 1),
+      start: new Date(2000, 0, 1),
       end: toDate(challenge?.endDate) || new Date(2999, 0, 1),
     };
   }
@@ -814,15 +814,29 @@ export function standings(members, period, challenge, by = "days") {
     const days = (m.days || []).filter(inRange);
     const jokerDays = (m.jokerDays || []).filter(inRange);
 
-    // Soma os pontos dos dias no intervalo selecionado. Para o total ("all"),
-    // usa a maior pontuação entre totalPoints salvo e a soma dos dayPoints.
     const scored = m.dayPoints || {};
+    const dayPointsSum = Object.values(scored).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    const memberTotalPoints = Number(m.totalPoints);
+    const hasValidTotalPoints = isFinite(memberTotalPoints) && memberTotalPoints > 0;
+    const baseExpected = (m.homemadeCount || 0) * 2 + (m.boughtCount || 0) * 1;
+
     let points = 0;
     if (period === "all") {
-      const dayPointsSum = Object.values(scored).reduce((sum, value) => sum + (Number(value) || 0), 0);
-      points = Math.max(Number(m.totalPoints || 0), dayPointsSum);
+      if (hasValidTotalPoints && memberTotalPoints >= baseExpected) {
+        points = memberTotalPoints;
+      } else {
+        points = Math.max(memberTotalPoints || 0, dayPointsSum);
+      }
     } else {
-      points = days.reduce((sum, day) => sum + (Number(scored[day]) || 0), 0);
+      const periodSum = days.reduce((sum, day) => sum + (Number(scored[day]) || 0), 0);
+      // Se todos os dias do membro estão no período selecionado e o totalPoints for maior,
+      // usa o totalPoints para evitar defasagem no mapa dayPoints.
+      const allDaysInRange = (m.days || []).length > 0 && (m.days || []).every(inRange);
+      if (allDaysInRange && hasValidTotalPoints && memberTotalPoints >= periodSum) {
+        points = memberTotalPoints;
+      } else {
+        points = periodSum;
+      }
     }
     return { ...m, count: days.length, days, jokerDays, points };
   });
