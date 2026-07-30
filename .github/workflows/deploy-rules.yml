@@ -60,3 +60,23 @@ jobs:
             echo ""
             echo "Confira em: https://console.firebase.google.com/project/ogusamaaisa/firestore/rules"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explicar a falha
+        if: failure()
+        # O 403 do firebaserules vem sem dizer qual papel falta. Deixar a
+        # resposta escrita aqui evita ter que redescobrir isso na próxima.
+        run: |
+          {
+            echo "### Falhou ❌"
+            echo ""
+            echo "Se o log traz **\`firebaserules.googleapis.com ... HTTP Error: 403\`**,"
+            echo "falta papel na conta de serviço — não é erro nas regras."
+            echo ""
+            echo "Conserto, uma vez só:"
+            echo ""
+            echo "1. Abra o [IAM do projeto](https://console.cloud.google.com/iam-admin/iam?project=ogusamaaisa)"
+            echo "2. Ache a conta de serviço usada no secret \`FIREBASE_SERVICE_ACCOUNT\`"
+            echo "3. **Editar** → **Adicionar outra função** → \`Administrador de regras do Firebase\`"
+            echo "   (\`roles/firebaserules.admin\`)"
+            echo "4. Salvar e rodar esta action de novo em **Run workflow**"
+          } >> "$GITHUB_STEP_SUMMARY"
