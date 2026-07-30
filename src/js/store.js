@@ -145,14 +145,23 @@ export async function joinByCode(rawCode) {
   if (!codeSnap.exists()) throw new Error("Não achei nenhum desafio com esse código.");
   const cid = codeSnap.data().challengeId;
 
+  const memberRef = doc(db, "challenges", cid, "members", u.uid);
+  const memberSnap = await getDoc(memberRef);
+
   const batch = writeBatch(db);
   batch.update(doc(db, "challenges", cid), { memberUids: arrayUnion(u.uid) });
-  batch.set(doc(db, "challenges", cid, "members", u.uid), {
-    name: u.name, photo: u.photo, role: "member",
-    days: [], dayPoints: {}, cuisines: [], jokerDays: [],
-    jokers: STARTING_JOKERS, homemadeCount: 0, boughtCount: 0,
-    total: 0, totalPoints: 0, joinedAt: serverTimestamp(),
-  }, { merge: true });
+  if (!memberSnap.exists()) {
+    batch.set(memberRef, {
+      name: u.name, photo: u.photo, role: "member",
+      days: [], dayPoints: {}, cuisines: [], jokerDays: [],
+      jokers: STARTING_JOKERS, homemadeCount: 0, boughtCount: 0,
+      total: 0, totalPoints: 0, joinedAt: serverTimestamp(),
+    });
+  } else {
+    batch.update(memberRef, {
+      name: u.name, photo: u.photo,
+    });
+  }
   batch.update(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) });
   await batch.commit();
 
@@ -398,23 +407,26 @@ export async function deletePost(cid, post) {
 
 /** Recalcula dias, pontos e passaporte do membro a partir dos posts que sobraram. */
 async function recountMember(cid, memberUid) {
+  const memberSnap = await getDoc(doc(db, "challenges", cid, "members", memberUid));
+  const memberData = memberSnap.exists() ? memberSnap.data() : {};
+  const jokerDays = memberData.jokerDays || [];
+
   const q = query(collection(db, "challenges", cid, "posts"), where("uid", "==", memberUid));
   const snap = await getDocs(q);
-  const posts = snap.docs.map((d) => d.data());
+  const posts = snap.docs.map((d) => d.data()).sort(byNewest).reverse();
 
   const days = [...new Set(posts.map(postDay).filter(Boolean))].sort();
   const cuisines = [...new Set(posts.map((p) => p.cuisine).filter(Boolean))];
   const homemadeCount = posts.filter((p) => p.homemade).length;
 
   // Refaz a pontuação post a post, respeitando o bônus de sequência.
-  const daySet = new Set(days);
+  const daySet = new Set([...days, ...jokerDays]);
   const dayPoints = {};
   let totalPoints = 0;
   for (const post of posts) {
     const day = postDay(post);
     if (!day) continue;
-    const [y, m, d] = day.split("-").map(Number);
-    const when = new Date(y, m - 1, d);
+    const when = postTime(post);
     const points = pointsFor(!!post.homemade, streakFrom(daySet, when));
     dayPoints[day] = (dayPoints[day] || 0) + points;
     totalPoints += points;
@@ -802,12 +814,16 @@ export function standings(members, period, challenge, by = "days") {
     const days = (m.days || []).filter(inRange);
     const jokerDays = (m.jokerDays || []).filter(inRange);
 
-    // Usa o total acumulado de pontos do membro quando disponível, e cai
-    // para o somatório do mapa de dias para dados antigos.
+    // Soma os pontos dos dias no intervalo selecionado. Para o total ("all"),
+    // usa a maior pontuação entre totalPoints salvo e a soma dos dayPoints.
     const scored = m.dayPoints || {};
-    const points = Number(
-      m.totalPoints ?? Object.values(scored).reduce((sum, value) => sum + (Number(value) || 0), 0)
-    );
+    let points = 0;
+    if (period === "all") {
+      const dayPointsSum = Object.values(scored).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      points = Math.max(Number(m.totalPoints || 0), dayPointsSum);
+    } else {
+      points = days.reduce((sum, day) => sum + (Number(scored[day]) || 0), 0);
+    }
     return { ...m, count: days.length, days, jokerDays, points };
   });
 
