@@ -16,7 +16,7 @@ const MOTIVOS = {
 export function notificationsView() {
   const el = h(`
     <div class="screen">
-      ${topbar({ left: backBtn("#/conta"), title: "Notificações" })}
+      ${topbar({ left: backBtn(), title: "Notificações" })}
       <div class="screen-body no-tabbar" data-body>${spinner()}</div>
     </div>`);
 
