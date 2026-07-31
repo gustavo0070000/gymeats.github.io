@@ -1661,3 +1661,146 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
   font-size: 13px; font-weight: 600; color: var(--text-3);
   padding-top: 2px;
 }
+
+/* ============================================================
+   Lista de pratos (a tela pra onde os números apontam)
+   ============================================================ */
+
+.pad-sub {
+  padding: 8px var(--pad) 2px;
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Rola na horizontal: com 3 ou 4 filtros ativos, quebrar linha empurraria
+   a lista pra baixo da dobra logo na abertura. */
+.filter-chips {
+  display: flex;
+  gap: 8px;
+  padding: 12px var(--pad);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.filter-chips::-webkit-scrollbar { display: none; }
+.filter-chips .chip { flex: 0 0 auto; white-space: nowrap; }
+.filter-chips .chip .x { opacity: .75; font-size: 13px; }
+
+.plate-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px var(--pad);
+  border-bottom: 1px solid var(--divider);
+}
+.plate-row:last-child { border-bottom: none; }
+.plate-row:active { background: var(--press); }
+
+.plate-thumb {
+  flex: 0 0 52px;
+  width: 52px; height: 52px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--track);
+  display: grid; place-items: center;
+  color: var(--text-3);
+}
+.plate-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.plate-main { flex: 1; min-width: 0; }
+.plate-title {
+  font-weight: 800;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plate-sub, .plate-marks {
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plate-marks { margin-top: 1px; }
+
+.plate-right { flex: 0 0 auto; text-align: right; }
+.plate-metric { font-weight: 800; font-size: 15px; }
+.plate-metric-sub { color: var(--text-2); font-size: 12.5px; font-weight: 600; }
+
+/* ---------- Detalhamento de pontos ---------- */
+
+.breakdown { padding: 4px 0 2px; }
+.bd-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 11px var(--pad);
+  border-bottom: 1px solid var(--divider);
+  font-weight: 700;
+}
+.bd-row:last-child { border-bottom: none; }
+.bd-row:active { background: var(--press); }
+.bd-row .bd-label { flex: 1; min-width: 0; }
+.bd-row .bd-conta { color: var(--text-2); font-weight: 600; font-size: 14px; }
+.bd-row .bd-valor { font-weight: 800; white-space: nowrap; }
+.bd-row.total { background: var(--fill); font-size: 17px; }
+.bd-row.total .bd-valor { color: var(--red); }
+
+/* Barra de proporção — mostra o peso de cada parte sem virar gráfico. */
+.bd-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 10px var(--pad) 4px;
+  background: var(--fill);
+}
+.bd-bar span { display: block; height: 100%; }
+.bd-bar .casa { background: var(--red); }
+.bd-bar .comprado { background: var(--red-soft); }
+.bd-bar .bonus { background: #F0C419; }
+
+.bd-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 2px var(--pad) 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+.bd-legenda i {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 3px;
+  margin-right: 5px;
+}
+
+/* ---------- Comparação com o período anterior ---------- */
+
+.delta {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.delta.up { color: var(--green); }
+.delta.down { color: var(--red); }
+.delta.flat { color: var(--text-3); }
+.stat .delta { display: block; margin-top: 2px; }
+
+.chev-mini { color: var(--text-3); font-weight: 700; margin-left: 2px; }
+/* .stat vira botão nas telas onde o número abre uma lista. */
+button.stat { background: none; border: none; font: inherit; color: inherit; }
+button.stat:active { opacity: .6; }
+
+/* Quatro colunas no mesmo card: encolhe pra não colidir nem quebrar rótulo. */
+.stats-row.tight .stat .v { font-size: 17px; letter-spacing: -.3px; }
+.stats-row.tight .stat .k { font-size: 12.5px; line-height: 1.2; }
+.stats-row.tight .stat { padding: 0 2px; min-width: 0; }

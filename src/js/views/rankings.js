@@ -3,6 +3,7 @@ import {
 } from "../ui.js";
 import { icon } from "../icons.js";
 import * as store from "../store.js";
+import { plateLink } from "./plates.js";
 import { navigate } from "../router.js";
 import { formatPoints, formatRating, MIN_RATINGS, SHAME_BELOW } from "../food.js";
 
@@ -130,6 +131,11 @@ export function rankingsView({ cid }) {
         <button class="btn btn-white btn-pill-center" data-toggle>
           ${expanded ? "Mostrar menos" : `Ver todos os ${best.length}`}
         </button>` : ""}
+      <div class="pad">
+        <button class="btn btn-outline" data-nav="${plateLink(cid, { periodo: period, ordem: "nota" })}">
+          Ver todos os pratos do período
+        </button>
+      </div>
 
       <div class="section-label left">💀 Rango da Vergonha</div>
       ${bottom.length ? `

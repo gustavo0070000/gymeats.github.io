@@ -1,6 +1,7 @@
 import { h, esc, avatar, topbar, backBtn, tabbar, spinner, relative, toast } from "../ui.js";
 import { icon } from "../icons.js";
 import * as store from "../store.js";
+import { plateLink } from "./plates.js";
 import { navigate } from "../router.js";
 import { formatRating } from "../food.js";
 
@@ -87,7 +88,7 @@ export function guideView({ cid }) {
     if (tab === "list") {
       panel.innerHTML = `<div class="card" style="padding:6px 0">
         ${places.map((p) => `
-          <button class="rank-row" ${p.lastPostId ? `data-nav="/c/${cid}/p/${p.lastPostId}"` : ""}>
+          <button class="rank-row" data-nav="${plateLink(cid, { periodo: "all", lugar: p.id })}">
             <div class="checkin-thumb" style="width:46px;height:46px">
               ${p.thumb ? `<img src="${esc(p.thumb)}" alt="">` : icon("pin", 20)}
             </div>

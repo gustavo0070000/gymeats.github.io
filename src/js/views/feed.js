@@ -188,6 +188,7 @@ export function feedView({ cid }) {
     const isOwner = challenge?.ownerUid === store.uid();
     const options = [
       { label: "📊 Recap do período", value: "recap" },
+      { label: "🍽️ Todos os pratos", value: "plates" },
       { label: "📍 Guia do grupo", value: "guide" },
       { label: "Convidar galera", value: "invite" },
       { label: "Detalhes do desafio", value: "details" },
@@ -197,6 +198,7 @@ export function feedView({ cid }) {
 
     const choice = await sheet(challenge?.name, options);
     if (choice === "recap") navigate(`/c/${cid}/recap`);
+    if (choice === "plates") navigate(`/c/${cid}/pratos?periodo=month`);
     if (choice === "guide") navigate(`/c/${cid}/guia`);
     if (choice === "invite") navigate(`/c/${cid}/convite`);
     if (choice === "details") navigate(`/c/${cid}/detalhes`);

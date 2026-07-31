@@ -24,6 +24,18 @@ export function path() {
   return raw.split("?")[0];
 }
 
+/**
+ * Parte depois do "?" da rota, já decodificada.
+ * A tela de pratos guarda os filtros aqui, então o link volta a abrir a
+ * mesma lista — dá pra mandar no bate-papo e a pessoa vê exatamente o que
+ * você viu.
+ */
+export function query() {
+  const raw = location.hash.replace(/^#/, "");
+  const i = raw.indexOf("?");
+  return i === -1 ? {} : Object.fromEntries(new URLSearchParams(raw.slice(i + 1)));
+}
+
 export function navigate(to, { replace = false } = {}) {
   if (to === "#back" || to === "back") {
     if (history.length > 1) history.back();

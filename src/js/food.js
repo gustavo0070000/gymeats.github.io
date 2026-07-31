@@ -76,6 +76,12 @@ export function formatPoints(n) {
   return Number.isInteger(v) ? String(v) : v.toFixed(1).replace(".", ",");
 }
 
+/** "1 pt", "2 pts", "1,5 pts" — o singular só vale pro 1 exato. */
+export function pointsLabel(n) {
+  const v = Math.round((Number(n) || 0) * 10) / 10;
+  return `${formatPoints(v)} ${v === 1 ? "pt" : "pts"}`;
+}
+
 export function formatMoney(n) {
   const v = Number(n);
   if (!isFinite(v)) return "";

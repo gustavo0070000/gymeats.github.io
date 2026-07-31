@@ -16,6 +16,7 @@ import { recapView } from "./views/recap.js";
 import { datesView } from "./views/dates.js";
 import { notificationsView } from "./views/notifications.js";
 import { sentView } from "./views/sent.js";
+import { platesView } from "./views/plates.js";
 
 const appEl = document.getElementById("app");
 
@@ -52,6 +53,7 @@ route("/c/:cid/convite", guard(inviteView));
 route("/c/:cid/editar", guard(editChallengeView));
 route("/c/:cid/guia", guard(guideView));
 route("/c/:cid/recap", guard(recapView));
+route("/c/:cid/pratos", guard(platesView));
 route("/c/:cid/datas", guard(datesView));
 route("/c/:cid/enviadas", guard(sentView));
 route("/c/:cid/p/:pid", guard(postView));

@@ -5,7 +5,8 @@ import {
 import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
-import { CUISINES, formatPoints } from "../food.js";
+import { CUISINES, formatPoints, pointsLabel } from "../food.js";
+import { plateLink } from "./plates.js";
 
 const TABS = [
   { id: "cal", label: "Calendário", ico: "calendar" },
@@ -66,9 +67,15 @@ export function profileView({ cid, uid: memberUid }) {
       </div>
 
       <div class="stats-row">
-        <div class="stat"><div class="v">${formatPoints(points)}</div><div class="k">Pontos</div></div>
-        <div class="stat"><div class="v">${days.length}</div><div class="k">Dias ativos</div></div>
-        <div class="stat"><div class="v">${stk}${stk >= 7 ? " 🔥" : ""}</div><div class="k">Sequência</div></div>
+        <button class="stat" data-tab-jump="stats">
+          <div class="v">${formatPoints(points)}</div><div class="k">Pontos</div>
+        </button>
+        <button class="stat" data-nav="${plateLink(cid, { periodo: "all", uid: memberUid })}">
+          <div class="v">${days.length}</div><div class="k">Dias ativos</div>
+        </button>
+        <button class="stat" data-tab-jump="cal">
+          <div class="v">${stk}${stk >= 7 ? " 🔥" : ""}</div><div class="k">Sequência</div>
+        </button>
       </div>
 
       ${isMe ? jokerBar(m) : ""}
@@ -85,6 +92,11 @@ export function profileView({ cid, uid: memberUid }) {
       if (!btn) return;
       tab = btn.dataset.tab;
       draw();
+    });
+
+    // Os números do topo levam pra aba que explica cada um.
+    body.querySelectorAll("[data-tab-jump]").forEach((btn) => {
+      btn.addEventListener("click", () => { tab = btn.dataset.tabJump; draw(); });
     });
 
     body.querySelector("[data-use-joker]")?.addEventListener("click", () => askJoker(m));
@@ -251,25 +263,67 @@ export function profileView({ cid, uid: memberUid }) {
     const line = (k, v) => `
       <div class="list-row"><span class="label">${k}</span><span class="value">${v}</span></div>`;
 
+    // Linha que abre a lista com o filtro já aplicado — o número deixa de
+    // ser um beco sem saída e vira o caminho pros pratos que o formaram.
+    const linkLine = (k, v, destino, sub = "") => `
+      <button class="bd-row" data-nav="${destino}">
+        <span class="bd-label">${k}${sub ? `<div class="bd-conta">${sub}</div>` : ""}</span>
+        <span class="bd-valor">${v} <span class="chev-mini">›</span></span>
+      </button>`;
+
+    const b = store.pointsBreakdown(m, statPosts || [], "all", challenge);
+    const faltou = Math.max(0, elapsed - days.length);
+    const todos = { periodo: "all", uid: memberUid };
+
     panel.innerHTML = `
+      <div class="section-label left">De onde vêm os pontos</div>
+      <div class="card breakdown">
+        ${statPosts === null ? spinner() : `
+          ${linkLine("👨‍🍳 Cozinhou", pointsLabel(b.caseiros * 2),
+            plateLink(cid, { ...todos, feito: "casa" }),
+            `${b.caseiros} ${b.caseiros === 1 ? "prato" : "pratos"} × 2`)}
+          ${linkLine("🛒 Comprou", pointsLabel(b.comprados),
+            plateLink(cid, { ...todos, feito: "comprado" }),
+            `${b.comprados} ${b.comprados === 1 ? "prato" : "pratos"} × 1`)}
+          ${b.bonus ? line("🔥 Bônus de sequência", `+${pointsLabel(b.bonus)}`) : ""}
+          <div class="bd-row total">
+            <span class="bd-label">Total</span>
+            <span class="bd-valor">${pointsLabel(b.total)}</span>
+          </div>`}
+      </div>
+
       <div class="card list-card">
         ${line("Posição por pontos", `${minePts?.position || "—"}º`)}
         ${line("Posição por dias", `${mine?.position || "—"}º`)}
-        ${line("Pontos no desafio", formatPoints(minePts?.points || 0))}
-        ${line("Dias ativos", days.length)}
-        ${line("Dias do desafio até hoje", elapsed)}
+        ${linkLine("Dias ativos", days.length, plateLink(cid, todos),
+          `de ${elapsed} ${elapsed === 1 ? "dia" : "dias"} de desafio${faltou ? ` · furou ${faltou}` : ""}`)}
         ${line("Frequência", `${rate}%`)}
         ${line("Sequência atual", `${store.memberStreak(m)} dias`)}
         ${line("Vitórias semanais", wins)}
       </div>
+
       <div class="section-label left">Cozinha</div>
       <div class="card list-card">
-        ${line("👨‍🍳 Cozinhou", cooked)}
-        ${line("🛒 Comprou", bought)}
         ${line("Taxa de fogão", `${cookRate}%`)}
         ${line("🌍 Carimbos no passaporte", `${(m.cuisines || []).length}/${CUISINES.length}`)}
         ${line("🃏 Vale-faltas restantes", m.jokers ?? store.STARTING_JOKERS)}
       </div>`;
+
+    // Os pratos chegam depois; quando chegarem, redesenha só este painel.
+    if (statPosts === null) carregarStatPosts().then(() => {
+      if (tab === "stats") drawStats(panel, m, days);
+    });
+  }
+
+  /* Os pratos do desafio inteiro, usados pra abrir a conta dos pontos. */
+  let statPosts = null, carregandoStats = null;
+  function carregarStatPosts() {
+    if (carregandoStats) return carregandoStats;
+    const { start, end } = store.periodRange("all", challenge);
+    carregandoStats = store.periodPosts(cid, start, end)
+      .then((list) => { statPosts = list; })
+      .catch(() => { statPosts = []; });
+    return carregandoStats;
   }
 
   const a = store.watchMembers(cid, (list) => { members = list; draw(); });

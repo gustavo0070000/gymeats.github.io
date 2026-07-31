@@ -5,7 +5,8 @@ import {
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
 import {
-  pointsFor, basePoints, ratingAverage, resolvePlaceKey, MIN_RATINGS, POINTS_BOUGHT,
+  pointsFor, basePoints, ratingAverage, resolvePlaceKey, MIN_RATINGS,
+  POINTS_BOUGHT, POINTS_HOMEMADE,
 } from "./food.js";
 
 /* ============================================================
@@ -723,6 +724,131 @@ export function rankByRating(posts, { min = MIN_RATINGS } = {}) {
   const best = [...eligible].sort((a, b) => b.ratingAvg - a.ratingAvg);
   const worst = [...eligible].sort((a, b) => a.ratingAvg - b.ratingAvg);
   return { best, worst, eligible };
+}
+
+/* ============================================================
+   Detalhamento
+
+   O app calculava esses números e jogava fora o caminho até eles:
+   a tela dizia "11 pontos" e "R$ 340" sem nunca mostrar a conta.
+   ============================================================ */
+
+/** O período imediatamente anterior, pra comparar. `all` não tem anterior. */
+export function previousRange(period, challenge) {
+  if (period === "all") return null;
+  const { start } = periodRange(period, challenge);
+  const end = new Date(start.getTime() - 1);          // 23:59:59.999 do dia anterior
+  const prev = new Date(start);
+
+  if (period === "week") prev.setDate(prev.getDate() - 7);
+  else if (period === "month") prev.setMonth(prev.getMonth() - 1);
+  else if (period === "year") prev.setFullYear(prev.getFullYear() - 1);
+
+  prev.setHours(0, 0, 0, 0);
+  return { start: prev, end };
+}
+
+/**
+ * De onde vieram os pontos de cada pessoa no período.
+ *
+ * A base sai dos posts (comprado = 1, caseiro = 2) e o bônus é o resto:
+ * o que o `dayPoints` registrou a mais é exatamente o que a sequência
+ * multiplicou. Assim a conta fecha com o placar em vez de recalcular a
+ * regra e arriscar divergir dele.
+ */
+export function pointsBreakdown(member, posts, period, challenge) {
+  const { start, end } = periodRange(period, challenge);
+  const from = dayKey(start), to = dayKey(end);
+  const meus = (posts || []).filter((p) => p.uid === member.uid);
+
+  const caseiros = meus.filter((p) => p.homemade).length;
+  const comprados = meus.length - caseiros;
+  const base = caseiros * POINTS_HOMEMADE + comprados * POINTS_BOUGHT;
+
+  const scored = member.dayPoints || {};
+  const total = period === "all"
+    ? Object.entries(scored).reduce((s, [, v]) => s + (Number(v) || 0), 0)
+    : Object.entries(scored)
+      .filter(([d]) => d >= from && d <= to)
+      .reduce((s, [, v]) => s + (Number(v) || 0), 0);
+
+  // Placar antigo pode não bater com os posts (membro criado antes do
+  // dayPoints existir). Nesse caso o bônus fica em zero em vez de negativo.
+  const bonus = Math.max(0, total - base);
+  return {
+    comprados, caseiros, base, bonus,
+    total: total || base,
+    confere: total >= base,
+  };
+}
+
+/** Quem gastou quanto, e onde o dinheiro foi parar. */
+export function spendBreakdown(posts, members = []) {
+  const comPreco = (posts || []).filter((p) => p.price > 0);
+  const total = comPreco.reduce((s, p) => s + p.price, 0);
+
+  const nome = (uid) => members.find((m) => m.uid === uid)?.name
+    || comPreco.find((p) => p.uid === uid)?.authorName || "Alguém";
+
+  const porPessoa = new Map();
+  const porCozinha = new Map();
+  comPreco.forEach((p) => {
+    const pessoa = porPessoa.get(p.uid) || { uid: p.uid, name: nome(p.uid), total: 0, n: 0 };
+    pessoa.total += p.price; pessoa.n += 1;
+    porPessoa.set(p.uid, pessoa);
+
+    if (!p.cuisine) return;
+    const c = porCozinha.get(p.cuisine) || { id: p.cuisine, total: 0, n: 0 };
+    c.total += p.price; c.n += 1;
+    porCozinha.set(p.cuisine, c);
+  });
+
+  const ordena = (a, b) => b.total - a.total;
+  return {
+    total,
+    n: comPreco.length,
+    semPreco: (posts || []).length - comPreco.length,
+    media: comPreco.length ? total / comPreco.length : 0,
+    caro: [...comPreco].sort((a, b) => b.price - a.price)[0] || null,
+    porPessoa: [...porPessoa.values()].sort(ordena)
+      .map((p) => ({ ...p, media: p.total / p.n })),
+    porCozinha: [...porCozinha.values()].sort(ordena)
+      .map((c) => ({ ...c, media: c.total / c.n })),
+  };
+}
+
+/* ---------- Filtros da lista de pratos ---------- */
+
+/** Um filtro só existe quando tem valor; assim a URL fica curta e legível. */
+export const FILTROS = ["uid", "cuisine", "meal", "feito", "nota", "preco", "dia", "lugar"];
+
+export function filterPosts(posts, f = {}) {
+  return (posts || []).filter((p) => {
+    if (f.uid && p.uid !== f.uid) return false;
+    if (f.cuisine && p.cuisine !== f.cuisine) return false;
+    if (f.meal && p.mealType !== f.meal) return false;
+    if (f.feito === "casa" && !p.homemade) return false;
+    if (f.feito === "comprado" && p.homemade) return false;
+    if (f.dia && postDay(p) !== f.dia) return false;
+    if (f.lugar && p.placeKey !== f.lugar) return false;
+    if (f.preco === "sim" && !(p.price > 0)) return false;
+    if (f.nota) {
+      const min = Number(f.nota);
+      if (!isFinite(min) || (p.ratingAvg ?? -1) < min) return false;
+    }
+    return true;
+  });
+}
+
+export const ORDENS = {
+  recentes: { label: "Mais recentes", cmp: byNewest },
+  antigos: { label: "Mais antigos", cmp: (a, b) => postTime(a) - postTime(b) },
+  nota: { label: "Melhor nota", cmp: (a, b) => (b.ratingAvg ?? -1) - (a.ratingAvg ?? -1) || byNewest(a, b) },
+  caro: { label: "Mais caro", cmp: (a, b) => (b.price ?? -1) - (a.price ?? -1) || byNewest(a, b) },
+};
+
+export function sortPosts(posts, ordem = "recentes") {
+  return [...(posts || [])].sort((ORDENS[ordem] || ORDENS.recentes).cmp);
 }
 
 /* ---------- Comentários ---------- */
