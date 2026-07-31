@@ -188,12 +188,17 @@ export function profileView({ cid, uid: memberUid }) {
     for (let d = 1; d <= total; d++) {
       const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const post = byDay.get(key);
+      const noDia = posts.filter((x) => x.dayKey === key).length;
       const hit = daySet.has(key);
       const joker = !hit && jokerSet.has(key);
+      // Um prato no dia: vai direto pro post. Mais de um: abre a lista do dia.
+      const destino = noDia > 1
+        ? plateLink(cid, { periodo: "all", uid: memberUid, dia: key })
+        : post ? `/c/${cid}/p/${post.id}` : "";
       cells.push(`
         <div class="cal-cell ${hit ? "hit" : ""} ${joker ? "joker" : ""} ${key === today ? "today" : ""}"
              ${d === 1 && lead ? `style="grid-column-start:${lead + 1}"` : ""}
-             ${post ? `data-nav="/c/${cid}/p/${post.id}"` : ""}>
+             ${destino ? `data-nav="${destino}"` : ""}>
           ${hit
             ? `<span class="fill">${post?.thumb ? `<img src="${esc(post.thumb)}" alt="">` : icon("fork", 18)}</span>`
             : joker ? `<span class="fill">🃏</span>` : d}

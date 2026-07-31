@@ -7,6 +7,7 @@ import { compress } from "../image.js";
 import { PHOTO } from "../config.js";
 import { icon } from "../icons.js";
 import * as store from "../store.js";
+import { plateLink } from "./plates.js";
 import { navigate } from "../router.js";
 import { openMenu, rememberChallenge } from "./home.js";
 
@@ -143,7 +144,7 @@ export function feedView({ cid }) {
       .map(([key, items]) => ({ key, items: items.sort(store.byNewest) }));
 
     postsEl.innerHTML = groups.map((g) => `
-      <div class="section-label">${esc(dayLabel(g.key))}</div>
+      <button class="section-label day-jump" data-nav="${plateLink(cid, { periodo: "all", dia: g.key })}">${esc(dayLabel(g.key))}</button>
       ${g.items.map((p) => `
         <button class="checkin" data-nav="/c/${cid}/p/${p.id}">
           <div class="checkin-thumb">

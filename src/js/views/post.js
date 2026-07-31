@@ -8,6 +8,7 @@ import { navigate } from "../router.js";
 import { compress, thumbnail, microThumbnail } from "../image.js";
 import { PHOTO } from "../config.js";
 import { pickPlace } from "./place-picker.js";
+import { plateLink } from "./plates.js";
 
 import {
   MEALS, mealById, CUISINES, cuisineById,
@@ -503,13 +504,22 @@ export function postView({ cid, pid }) {
       <div class="post-title">${esc(post.title || "")}</div>
       ${post.description ? `<div class="post-desc">${esc(post.description)}</div>` : '<div style="height:10px"></div>'}
 
+      <!-- Cada marca abre os outros pratos com a mesma característica: é a
+           tela mais visitada do app e não levava a lugar nenhum. -->
       <div class="meta-chips">
-        <span class="meta-chip">${post.homemade ? "👨‍🍳 Cozinhou" : "🛒 Comprou"}
-          <b class="pts">+${formatPoints(basePoints(post.homemade))}</b></span>
-        ${cuisine ? `<span class="meta-chip">${cuisine.emoji} ${cuisine.label}</span>` : ""}
-        ${meal ? `<span class="meta-chip">${meal.emoji} ${meal.label}</span>` : ""}
+        <button class="meta-chip" data-nav="${plateLink(cid, {
+          periodo: "all", feito: post.homemade ? "casa" : "comprado" })}">
+          ${post.homemade ? "👨‍🍳 Cozinhou" : "🛒 Comprou"}
+          <b class="pts">+${formatPoints(basePoints(post.homemade))}</b></button>
+        ${cuisine ? `<button class="meta-chip" data-nav="${plateLink(cid, {
+          periodo: "all", cuisine: post.cuisine })}">${cuisine.emoji} ${cuisine.label}</button>` : ""}
+        ${meal ? `<button class="meta-chip" data-nav="${plateLink(cid, {
+          periodo: "all", meal: post.mealType })}">${meal.emoji} ${meal.label}</button>` : ""}
         ${post.place || post.coords
-          ? `<span class="meta-chip">${icon("pin", 16)} ${esc(post.place || "Marcado no mapa")}</span>`
+          ? (post.placeKey
+            ? `<button class="meta-chip" data-nav="${plateLink(cid, { periodo: "all", lugar: post.placeKey })}">
+                 ${icon("pin", 16)} ${esc(post.place || "Marcado no mapa")}</button>`
+            : `<span class="meta-chip">${icon("pin", 16)} ${esc(post.place || "Marcado no mapa")}</span>`)
           : ""}
         ${Object.entries(reactions).map(([emoji, uids]) => `
           <button class="meta-chip" data-react="${esc(emoji)}"

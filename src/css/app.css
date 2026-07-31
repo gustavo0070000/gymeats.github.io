@@ -89,6 +89,10 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* Vários componentes definem `display`, que vence o [hidden] do navegador —
+   o botão continuava na tela mesmo escondido. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -1804,3 +1808,70 @@ button.stat:active { opacity: .6; }
 .stats-row.tight .stat .v { font-size: 17px; letter-spacing: -.3px; }
 .stats-row.tight .stat .k { font-size: 12.5px; line-height: 1.2; }
 .stats-row.tight .stat { padding: 0 2px; min-width: 0; }
+
+/* ---------- Filtro da lista de pratos ---------- */
+
+.chip-n {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.07);
+  font-size: 12.5px;
+  font-weight: 800;
+  text-align: center;
+}
+.chip.active .chip-n { background: rgba(255,255,255,.28); }
+@media (prefers-color-scheme: dark) {
+  .chip-n { background: rgba(255,255,255,.12); }
+}
+
+/* Flutua sobre a lista: com o filtro na topbar, a mão teria que subir
+   até o topo do celular pra mexer no que muda a tela inteira. */
+.fab-filtro-wrap {
+  position: sticky;
+  bottom: calc(var(--safe-bottom) + 14px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 30;
+  margin-top: -54px;
+}
+.fab-filtro {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 22px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-weight: 800;
+  font-size: 16px;
+  box-shadow: var(--shadow-fab);
+}
+.fab-filtro:active { background: var(--red-press); }
+
+/* Rodapé da tela de filtro: o "Ver N pratos" fica sempre à mão. */
+.filtro-rodape {
+  position: sticky;
+  bottom: 0;
+  padding: 10px var(--pad) calc(var(--safe-bottom) + 12px);
+  background: linear-gradient(to bottom, transparent, var(--bg) 22%);
+}
+
+/* Aviso de recorte: a busca tem teto e calar isso deixa número errado passar. */
+.truncado {
+  margin: 0 var(--pad) 10px;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  background: var(--red-soft);
+  color: var(--red-ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* Cabeçalho de dia no feed vira botão pra lista daquele dia. */
+.day-jump { display: block; width: 100%; background: none; }
+.day-jump:active { opacity: .55; }

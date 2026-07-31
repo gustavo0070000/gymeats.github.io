@@ -3,7 +3,7 @@ import {
 } from "../ui.js";
 import { icon } from "../icons.js";
 import * as store from "../store.js";
-import { query } from "../router.js";
+import { query, navigate } from "../router.js";
 import {
   CUISINES, MEALS, cuisineById, mealById, formatRating, formatMoney, formatPoints,
 } from "../food.js";
@@ -30,14 +30,22 @@ export function platesView({ cid }) {
   const el = h(`
     <div class="screen">
       ${topbar({
-        left: backBtn("#back"),
+        left: `<button class="topbar-btn" data-voltar>${icon("back")}</button>`,
         title: "Pratos",
-        right: `<button class="topbar-btn" data-ordenar>${icon("sort")}</button>`,
+        right: `<button class="topbar-action" data-limpar-tudo hidden>Limpar</button>
+                <button class="topbar-btn" data-ordenar>${icon("sort")}</button>`,
       })}
       <div class="screen-body no-tabbar" data-body>${spinner()}</div>
+      <div class="fab-filtro-wrap"><button class="fab-filtro" data-abrir-filtro>
+        ${icon("filter", 20)} Filtrar
+      </button></div>
     </div>`);
 
   const body = el.querySelector("[data-body]");
+  const tituloEl = el.querySelector(".topbar-title");
+  const botaoOrdenar = el.querySelector("[data-ordenar]");
+  const botaoLimpar = el.querySelector("[data-limpar-tudo]");
+  const fab = el.querySelector(".fab-filtro-wrap");
 
   const inicial = query();
   let periodo = PERIODOS.some((p) => p.id === inicial.periodo) ? inicial.periodo : "month";
@@ -149,9 +157,119 @@ export function platesView({ cid }) {
       </button>`;
   };
 
+  /* ============================================================
+     Tela de filtro
+
+     Vira tela em vez de folha porque com contador cada opção precisa de
+     linha própria: as 24 cozinhas sozinhas já fariam uma folha rolável
+     mais alta que o celular.
+
+     O contador de cada opção é o resultado real de escolhê-la — ou seja,
+     conta com os outros filtros já aplicados, menos o da própria seção.
+     Assim nunca dá pra escolher algo e cair numa lista vazia.
+     ============================================================ */
+
+  let filtrando = false;
+
+  function contarPara(chave, valor) {
+    const hipotese = { ...filtros, [chave]: valor };
+    return store.filterPosts(posts || [], hipotese).length;
+  }
+
+  function secaoFiltro(titulo, chave, opcoes) {
+    const linhas = opcoes
+      .map((o) => ({ ...o, n: contarPara(chave, o.value) }))
+      // Opção que daria lista vazia não aparece — a não ser que esteja ativa,
+      // senão ela sumiria e ninguém conseguiria desmarcar.
+      .filter((o) => o.n > 0 || filtros[chave] === o.value);
+    if (!linhas.length) return "";
+
+    return `
+      <div class="section-label left">${esc(titulo)}</div>
+      <div class="card"><div class="chip-wrap ${linhas.length > 10 ? "scroll" : ""}">
+        ${linhas.map((o) => `
+          <button class="chip ${filtros[chave] === o.value ? "active" : ""}"
+                  data-filtro="${chave}" data-valor="${esc(o.value)}">
+            ${o.label} <span class="chip-n">${o.n}</span>
+          </button>`).join("")}
+      </div></div>`;
+  }
+
+  function desenharFiltro() {
+    const presentes = (campo) => [...new Set((posts || []).map((p) => p[campo]).filter(Boolean))];
+    const total = store.filterPosts(posts || [], filtros).length;
+
+    body.innerHTML = `
+      ${secaoFiltro("Quem postou", "uid", members
+        .filter((m) => (posts || []).some((p) => p.uid === m.uid))
+        .map((m) => ({ value: m.uid, label: esc(m.name.split(" ")[0]) })))}
+
+      ${secaoFiltro("Feito em casa?", "feito", [
+        { value: "casa", label: "👨‍🍳 Cozinhado" },
+        { value: "comprado", label: "🛒 Comprado" },
+      ])}
+
+      ${secaoFiltro("Refeição", "meal", MEALS
+        .filter((m) => presentes("mealType").includes(m.id))
+        .map((m) => ({ value: m.id, label: `${m.emoji} ${m.label}` })))}
+
+      ${secaoFiltro("Cozinha", "cuisine", CUISINES
+        .filter((c) => presentes("cuisine").includes(c.id))
+        .map((c) => ({ value: c.id, label: `${c.emoji} ${c.label}` })))}
+
+      ${secaoFiltro("Nota", "nota", [8, 9].map((n) => ({ value: String(n), label: `⭐ ${n} ou mais` })))}
+
+      ${secaoFiltro("Preço", "preco", [{ value: "sim", label: "💸 Com preço declarado" }])}
+
+      ${secaoFiltro("Lugar", "lugar", presentes("placeKey").map((k) => ({
+        value: k,
+        label: `📍 ${esc((posts || []).find((p) => p.placeKey === k)?.place || "Marcado no mapa")}`,
+      })))}
+
+      <div class="gap"></div>
+      <div class="filtro-rodape">
+        <button class="btn btn-primary" data-aplicar>
+          ${total ? `Ver ${total} ${total === 1 ? "prato" : "pratos"}` : "Nenhum prato com esses filtros"}
+        </button>
+      </div>`;
+
+    body.querySelectorAll("[data-filtro]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const { filtro, valor } = btn.dataset;
+        // Tocar de novo na opção ativa desmarca.
+        if (filtros[filtro] === valor) delete filtros[filtro];
+        else filtros[filtro] = valor;
+        sincronizarURL();
+        botaoLimpar.hidden = !Object.keys(filtros).length;
+        desenharFiltro();
+      });
+    });
+    body.querySelector("[data-aplicar]").addEventListener("click", fecharFiltro);
+  }
+
+  function abrirFiltro() {
+    if (posts === null) return;
+    filtrando = true;
+    tituloEl.textContent = "Filtrar";
+    botaoOrdenar.hidden = true;
+    botaoLimpar.hidden = !Object.keys(filtros).length;
+    fab.hidden = true;
+    desenharFiltro();
+  }
+
+  function fecharFiltro() {
+    filtrando = false;
+    tituloEl.textContent = "Pratos";
+    botaoOrdenar.hidden = false;
+    botaoLimpar.hidden = true;
+    fab.hidden = false;
+    desenhar();
+  }
+
   /* ---------- tela ---------- */
 
   function desenhar() {
+    if (filtrando) return desenharFiltro();
     if (!challenge) return;
     const { start, end } = store.periodRange(periodo, challenge);
     const chips = rotulos();
@@ -189,7 +307,10 @@ export function platesView({ cid }) {
       return;
     }
 
-    body.innerHTML = cabeca + resumo(lista) + `
+    const corte = store.avisoDeCorte(posts);
+    body.innerHTML = cabeca
+      + (corte ? `<div class="truncado">${esc(corte)}</div>` : "")
+      + resumo(lista) + `
       <div class="section-label left">
         ${lista.length} ${lista.length === 1 ? "prato" : "pratos"} · ${esc(store.ORDENS[ordem].label.toLowerCase())}
       </div>
@@ -218,13 +339,29 @@ export function platesView({ cid }) {
     });
   }
 
-  el.querySelector("[data-ordenar]").addEventListener("click", async () => {
+  botaoOrdenar.addEventListener("click", async () => {
     const escolha = await sheet("Ordenar por", Object.entries(store.ORDENS)
       .map(([id, o]) => ({ value: id, label: o.label + (id === ordem ? "  ✓" : "") })));
     if (!escolha || !store.ORDENS[escolha]) return;
     ordem = escolha;
     sincronizarURL();
     desenhar();
+  });
+
+  el.querySelector("[data-abrir-filtro]").addEventListener("click", abrirFiltro);
+
+  botaoLimpar.addEventListener("click", () => {
+    filtros = {};
+    sincronizarURL();
+    desenharFiltro();
+    botaoLimpar.hidden = true;
+  });
+
+  // Com o filtro aberto, voltar fecha o filtro em vez de sair da tela —
+  // é o que o gesto de voltar do Android faz e o que a pessoa espera.
+  el.querySelector("[data-voltar]").addEventListener("click", () => {
+    if (filtrando) return fecharFiltro();
+    navigate("#back");
   });
 
   const a = store.watchChallenge(cid, (c) => { challenge = c; desenhar(); carregar(); });

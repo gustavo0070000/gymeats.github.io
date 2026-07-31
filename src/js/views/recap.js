@@ -270,7 +270,9 @@ export function recapView({ cid }) {
         <span class="bd-valor">${valor}</span>
       </button>`;
 
+    const corte = store.avisoDeCorte(posts);
     body.innerHTML = head + `
+      ${corte ? `<div class="truncado">${esc(corte)}</div>` : ""}
       <div class="section-label">Pódio</div>
       <div class="card podium">${podium(s.rows)}</div>
 

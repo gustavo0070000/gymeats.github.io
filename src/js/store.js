@@ -706,6 +706,14 @@ export function watchNotificationLog(cid, cb, max = 80) {
 
 /* ---------- Posts de um período (recap, prato da semana, guia) ---------- */
 
+/**
+ * Posts de um intervalo.
+ *
+ * A busca tem teto. Enquanto o teto não é atingido tudo bate, mas no dia em
+ * que atingir, todo número derivado daqui (recap, gasto, pontos) fica errado
+ * em silêncio — e agora tem muita tela pendurada nisso. Por isso a lista sai
+ * marcada com `truncada`, e quem mostra número avisa em vez de mentir.
+ */
 export async function periodPosts(cid, start, end, max = 500) {
   const q = query(
     collection(db, "challenges", cid, "posts"),
@@ -715,7 +723,19 @@ export async function periodPosts(cid, start, end, max = 500) {
     limit(max),
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
+  // Propriedade não-enumerável: não aparece em spread nem em JSON, então
+  // nenhuma tela que copia a lista carrega isso sem querer.
+  Object.defineProperty(list, "truncada", { value: snap.size >= max, enumerable: false });
+  Object.defineProperty(list, "teto", { value: max, enumerable: false });
+  return list;
+}
+
+/** Aviso pronto pra tela quando a busca bateu no teto. Vazio quando não bateu. */
+export function avisoDeCorte(posts) {
+  if (!posts?.truncada) return "";
+  return `Mostrando os ${posts.teto} pratos mais recentes do período — `
+    + "há mais que isso, então os totais abaixo contam só esses.";
 }
 
 /** Melhores e piores pratos de uma lista, respeitando o mínimo de votos. */
