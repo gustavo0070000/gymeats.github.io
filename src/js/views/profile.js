@@ -53,8 +53,11 @@ export function profileView({ cid, uid: memberUid }) {
 
     const days = m.days || [];
     const stk = store.memberStreak(m);
-    const dayPointsSum = Object.values(m.dayPoints || {}).reduce((a, b) => a + (Number(b) || 0), 0);
-    const points = Math.max(Number(m.totalPoints || 0), dayPointsSum);
+    // O topo usava max(totalPoints, soma do dayPoints) e o resto do app usava
+    // o placar; quando os dois divergiam, o perfil mostrava um número que não
+    // aparecia em lugar nenhum. Agora sai da mesma fonte da classificação.
+    const points = store.standings(members, "all", challenge, "points")
+      .find((r) => r.uid === memberUid)?.points ?? 0;
     body.innerHTML = `
       <div class="profile-head">
         ${avatar(m, "hero")}

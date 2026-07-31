@@ -1,7 +1,7 @@
 import {
   db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
-  arrayUnion, arrayRemove, increment, writeBatch, runTransaction,
+  arrayUnion, arrayRemove, increment, writeBatch, runTransaction, deleteField,
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
 import {
@@ -433,8 +433,17 @@ async function recountMember(cid, memberUid) {
     totalPoints += points;
   }
 
+  // `merge: true` funde mapas em vez de trocá-los: um dia que deixou de
+  // existir (post apagado, data corrigida) continuava valendo pontos pra
+  // sempre. Cada chave sumida vira um deleteField explícito.
+  const antigos = memberData.dayPoints || {};
+  const patch = { ...dayPoints };
+  Object.keys(antigos).forEach((dia) => {
+    if (!(dia in dayPoints)) patch[dia] = deleteField();
+  });
+
   await setDoc(doc(db, "challenges", cid, "members", memberUid), {
-    days, dayPoints, totalPoints, cuisines,
+    days, dayPoints: patch, totalPoints, cuisines,
     homemadeCount,
     boughtCount: posts.length - homemadeCount,
     total: posts.length,
@@ -753,6 +762,14 @@ export function rankByRating(posts, { min = MIN_RATINGS } = {}) {
    a tela dizia "11 pontos" e "R$ 340" sem nunca mostrar a conta.
    ============================================================ */
 
+/** Meia-noite local do dia do post — sem passar por fuso, como o dayKey. */
+function diaDoPost(p) {
+  const chave = postDay(p);
+  if (!chave) return postTime(p);
+  const [ano, mes, dia] = chave.split("-").map(Number);
+  return new Date(ano, mes - 1, dia);
+}
+
 /** O período imediatamente anterior, pra comparar. `all` não tem anterior. */
 export function previousRange(period, challenge) {
   if (period === "all") return null;
@@ -771,34 +788,51 @@ export function previousRange(period, challenge) {
 /**
  * De onde vieram os pontos de cada pessoa no período.
  *
- * A base sai dos posts (comprado = 1, caseiro = 2) e o bônus é o resto:
- * o que o `dayPoints` registrou a mais é exatamente o que a sequência
- * multiplicou. Assim a conta fecha com o placar em vez de recalcular a
- * regra e arriscar divergir dele.
+ * Tudo é recalculado a partir dos próprios posts, pela mesma regra que
+ * concede os pontos. A primeira versão tirava o bônus por subtração
+ * (`guardado − base`), e isso mentia: qualquer defasagem no placar
+ * guardado — dia fantasma, post apagado — aparecia na tela como "bônus
+ * de sequência" pra quem nunca chegou perto de sete dias seguidos.
+ *
+ * `guardado` e `confere` expõem a defasagem em vez de escondê-la dentro
+ * de outro número.
  */
 export function pointsBreakdown(member, posts, period, challenge) {
   const { start, end } = periodRange(period, challenge);
   const from = dayKey(start), to = dayKey(end);
+  // `posts` já vem do período (periodPosts filtra por dayKey no servidor).
+  // Refiltrar aqui por postDay parecia inofensivo e não é: quando os dois
+  // divergem — post com data corrigida — o prato sumia da conta sem aviso.
   const meus = (posts || []).filter((p) => p.uid === member.uid);
 
-  const caseiros = meus.filter((p) => p.homemade).length;
-  const comprados = meus.length - caseiros;
-  const base = caseiros * POINTS_HOMEMADE + comprados * POINTS_BOUGHT;
+  // A sequência de cada post é contada como no dia em que ele valeu. A âncora
+  // é o `postDay`, o mesmo eixo de onde `days` foi montado — ancorar no
+  // `postTime` fazia a conta errar sempre que os dois divergiam (post com data
+  // corrigida), e o erro aparecia como bônus fantasma.
+  const daySet = new Set([...(member.days || []), ...(member.jokerDays || [])]);
+  let base = 0, bonus = 0;
+  for (const p of meus) {
+    const b = basePoints(!!p.homemade);
+    base += b;
+    bonus += pointsFor(!!p.homemade, streakFrom(daySet, diaDoPost(p))) - b;
+  }
 
   const scored = member.dayPoints || {};
-  const total = period === "all"
-    ? Object.entries(scored).reduce((s, [, v]) => s + (Number(v) || 0), 0)
-    : Object.entries(scored)
-      .filter(([d]) => d >= from && d <= to)
-      .reduce((s, [, v]) => s + (Number(v) || 0), 0);
+  const guardado = Object.entries(scored)
+    .filter(([d]) => period === "all" || (d >= from && d <= to))
+    .reduce((s, [, v]) => s + (Number(v) || 0), 0);
 
-  // Placar antigo pode não bater com os posts (membro criado antes do
-  // dayPoints existir). Nesse caso o bônus fica em zero em vez de negativo.
-  const bonus = Math.max(0, total - base);
+  const caseiros = meus.filter((p) => p.homemade).length;
+  const total = base + bonus;
   return {
-    comprados, caseiros, base, bonus,
-    total: total || base,
-    confere: total >= base,
+    comprados: meus.length - caseiros,
+    caseiros,
+    base,
+    bonus,
+    total,
+    guardado,
+    // Diferença de arredondamento não conta; o bônus é múltiplo de 0,5.
+    confere: Math.abs(guardado - total) < 0.05,
   };
 }
 

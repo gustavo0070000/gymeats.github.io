@@ -133,10 +133,14 @@ export function recapView({ cid }) {
    * O pódio mostrava só três; num grupo de quatro, o último simplesmente
    * não existia na tela — e ninguém via de onde os pontos vinham.
    */
+  /** Ficha original do membro: a do placar vem com `days` cortado pelo período,
+      e a sequência é histórico, não recorte. */
+  const fichaDe = (uid) => members.find((x) => x.uid === uid) || { uid };
+
   function tabelaCompleta(rows) {
     if (!rows.length) return "";
     return rows.map((m) => {
-      const b = store.pointsBreakdown(m, posts || [], period, challenge);
+      const b = store.pointsBreakdown(fichaDe(m.uid), posts || [], period, challenge);
       const partes = [
         b.caseiros ? `${b.caseiros}× casa` : "",
         b.comprados ? `${b.comprados}× comprado` : "",
@@ -149,15 +153,22 @@ export function recapView({ cid }) {
             ${m.position}º ${esc(m.name.split(" ")[0])}
             <div class="bd-conta">${partes || "sem pratos no período"}</div>
           </span>
-          <span class="bd-valor">${pointsLabel(m.points)}</span>
+          <span class="bd-valor">${pointsLabel(b.total)}</span>
         </button>`;
     }).join("");
+  }
+
+  /** Quem está com o placar guardado diferente do que os pratos dizem. */
+  function defasados(rows) {
+    return rows
+      .filter((m) => !store.pointsBreakdown(fichaDe(m.uid), posts || [], period, challenge).confere)
+      .map((m) => m.name.split(" ")[0]);
   }
 
   /** A conta do total do grupo, com a barra mostrando o peso de cada parte. */
   function barraDePontos(rows) {
     const soma = rows.reduce((acc, m) => {
-      const b = store.pointsBreakdown(m, posts || [], period, challenge);
+      const b = store.pointsBreakdown(fichaDe(m.uid), posts || [], period, challenge);
       return {
         casa: acc.casa + b.caseiros * 2,
         comprado: acc.comprado + b.comprados,
@@ -176,9 +187,9 @@ export function recapView({ cid }) {
         ${soma.bonus ? `<span class="bonus" style="width:${pct(soma.bonus)}"></span>` : ""}
       </div>
       <div class="bd-legenda">
-        ${soma.casa ? `<span><i style="background:var(--red)"></i>Cozinhado ${formatPoints(soma.casa)}</span>` : ""}
-        ${soma.comprado ? `<span><i style="background:var(--red-soft)"></i>Comprado ${formatPoints(soma.comprado)}</span>` : ""}
-        ${soma.bonus ? `<span><i style="background:#F0C419"></i>Bônus de sequência ${formatPoints(soma.bonus)}</span>` : ""}
+        ${soma.casa ? `<span><i style="background:var(--red)"></i>Cozinhado ${pointsLabel(soma.casa)}</span>` : ""}
+        ${soma.comprado ? `<span><i style="background:var(--red-soft)"></i>Comprado ${pointsLabel(soma.comprado)}</span>` : ""}
+        ${soma.bonus ? `<span><i style="background:#F0C419"></i>Bônus de sequência ${pointsLabel(soma.bonus)}</span>` : ""}
       </div>`;
   }
 
@@ -294,6 +305,11 @@ export function recapView({ cid }) {
       ${s.worst && s.worst.id !== s.best?.id ? plateCard(s.worst, "Rango da Vergonha", "💀") : ""}
 
       <div class="section-label">De onde vieram os pontos</div>
+      ${defasados(s.rows).length ? `<div class="truncado">
+        O placar guardado de ${esc(defasados(s.rows).join(", "))} não bate com os
+        pratos. A conta abaixo vem dos pratos, que é a fonte certa.
+        O dono do desafio pode arrumar em Editar desafio → Recalcular placar.
+      </div>` : ""}
       <div class="card breakdown">
         ${tabelaCompleta(s.rows)}
         ${barraDePontos(s.rows)}
