@@ -67,7 +67,7 @@ export function notificationsView() {
           ].map(([texto, ok]) => `
             <div class="list-row">
               <span class="label">${esc(texto)}</span>
-              <span class="value" style="color:${ok ? "#2E7D32" : "var(--red)"}">${ok ? "ok" : "não"}</span>
+              <span class="value" style="color:${ok ? "var(--green)" : "var(--red)"}">${ok ? "ok" : "não"}</span>
             </div>`).join("")}
           ${estado.erro ? `<div class="list-row"><span class="label">Erro</span>
             <span class="value">${esc(estado.erro)}</span></div>` : ""}

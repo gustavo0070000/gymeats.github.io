@@ -219,7 +219,7 @@ export function profileView({ cid, uid: memberUid }) {
       ${posts.length ? `
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:0 3px">
           ${posts.map((p) => `
-            <button data-nav="/c/${cid}/p/${p.id}" style="aspect-ratio:1;overflow:hidden;background:#DDD">
+            <button data-nav="/c/${cid}/p/${p.id}" style="aspect-ratio:1;overflow:hidden;background:var(--track)">
               ${p.thumb ? `<img src="${esc(p.thumb)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block">` : ""}
             </button>`).join("")}
         </div>` : `<div class="empty">Nenhum prato nesse mês.</div>`}`;

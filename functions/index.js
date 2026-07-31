@@ -29,6 +29,13 @@ const PADRAO = { posts: true, comments: true, ratings: true, recaps: true };
 // Teto do campo `data` de uma mensagem do FCM.
 const LIMITE_FCM = 4096;
 
+// O app não está na raiz do domínio: a raiz serve outro site. Link sem esse
+// prefixo joga quem clica na notificação pra fora do GymEats.
+const APP_URL = "https://gustavo0070000.github.io/gymeats.github.io/";
+
+/** Caminho dentro do app, relativo ao index — nunca começa com "/". */
+const rota = (caminho = "") => `#/${String(caminho).replace(/^[/#]+/, "")}`;
+
 /* ============================================================
    Envio
    ============================================================ */
@@ -106,7 +113,7 @@ async function enviar(alvos, payload, registro = null) {
     data: dados,
     webpush: {
       headers: { Urgency: "high", TTL: "86400" },
-      fcmOptions: { link: payload.url || "/" },
+      fcmOptions: { link: new URL(payload.url || "", APP_URL).href },
     },
   });
 
@@ -203,7 +210,7 @@ exports.aoPostarPrato = onDocumentCreated(
       body: post.title || challenge.name || "Novo prato no desafio",
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
-      url: `/#/c/${cid}/p/${pid}`,
+      url: rota(`c/${cid}/p/${pid}`),
     }, { cid, tipo: "posts", motivo: motivoVazio(quem) });
   });
 
@@ -228,7 +235,7 @@ exports.aoComentar = onDocumentCreated(
       body: comentario.text || "",
       image: imagemDoPrato(post),
       tag: `post-${pid}`,
-      url: `/#/c/${cid}/p/${pid}`,
+      url: rota(`c/${cid}/p/${pid}`),
     }, { cid, tipo: "comments", motivo: motivoVazio(quem) });
   });
 
@@ -262,7 +269,7 @@ exports.aoDarNota = onDocumentUpdated(
       body: depois.title || "",
       image: imagemDoPrato(depois),
       tag: `post-${pid}`,
-      url: `/#/c/${cid}/p/${pid}`,
+      url: rota(`c/${cid}/p/${pid}`),
     }, { cid, tipo: "ratings", motivo: motivoVazio(dono) });
   });
 
@@ -322,7 +329,7 @@ async function mandarRecap(periodo, de, ate, titulo) {
       body: `${campeao.pontos} ${campeao.pontos === 1 ? "ponto" : "pontos"} em `
         + `${campeao.dias} ${campeao.dias === 1 ? "dia" : "dias"}${segundo}`,
       tag: `recap-${periodo}-${cid}`,
-      url: `/#/c/${cid}/recap`,
+      url: rota(`c/${cid}/recap`),
     }, { cid, tipo: "recaps", motivo: motivoVazio(galera) });
   }
 }
@@ -411,7 +418,7 @@ exports.testarNotificacao = onCall(async (request) => {
   const r = await enviar(alvos, {
     title: "Deu certo! 🎉",
     body: "As notificações do GymEats estão funcionando neste aparelho.",
-    url: "/#/notificacoes",
+    url: rota("notificacoes"),
   });
 
   return {

@@ -155,7 +155,7 @@ export function composeView({ cid }) {
             </div>
 
             <div class="compose-photo">
-              ${previewUrl ? `<img src="${previewUrl}" alt="">` : `<div style="width:100%;height:100%;display:grid;place-items:center;background:#DDD;color:#888">${icon("camera", 30)}</div>`}
+              ${previewUrl ? `<img src="${previewUrl}" alt="">` : `<div style="width:100%;height:100%;display:grid;place-items:center;background:var(--track);color:var(--text-2)">${icon("camera", 30)}</div>`}
               <button class="edit-btn" data-change>${icon("pencil", 20)}</button>
             </div>
 

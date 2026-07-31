@@ -6,11 +6,16 @@
 <title>GymEats</title>
 
 <meta name="description" content="Desafios de comida entre amigos. Poste seu prato todo dia.">
-<meta name="theme-color" content="#F2F2F2">
+<!-- A barra de status do celular segue o tema; sem os dois o Android
+     pinta a barra de claro mesmo com o app no escuro. -->
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F2F2F2">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212">
 <link rel="manifest" href="./manifest.webmanifest">
 
 <!-- iOS PWA -->
 <meta name="apple-mobile-web-app-capable" content="yes">
+<!-- "default" de propósito: o iOS usa o theme-color acima pra pintar a barra.
+     "black-translucent" fixaria texto branco, ilegível no tema claro. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="GymEats">
 <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">

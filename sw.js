@@ -3,7 +3,7 @@
 // e instantaneamente; os dados vêm do Firestore, que tem o próprio cache
 // em IndexedDB. Nunca cacheamos chamadas de rede do Firebase.
 
-const VERSION = "v16";
+const VERSION = "v17";
 const SHELL = `gymeats-shell-${VERSION}`;
 
 // O GitHub Pages serve com "cache-control: max-age=600". Um fetch normal
@@ -101,9 +101,20 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(titulo, opcoes));
 });
 
+// O app não mora na raiz do domínio — fica em /gymeats.github.io/, e a raiz
+// serve outro site. Um link "/#/c/..." resolvido contra location.href perde o
+// prefixo e cai lá fora; contra o scope do service worker, não. A barra da
+// frente é tirada de propósito: com ela, `new URL` volta pra raiz mesmo tendo
+// base. Vale também pras notificações antigas, que já saíram com "/#/...".
+const dentroDoApp = (url) => {
+  const destino = new URL(String(url || "./").replace(/^\/+/, ""), self.registration.scope).href;
+  // Nada de link levar pra fora do app, mesmo que o payload venha torto.
+  return destino.startsWith(self.registration.scope) ? destino : self.registration.scope;
+};
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const destino = new URL(event.notification.data?.url || "./", self.location.href).href;
+  const destino = dentroDoApp(event.notification.data?.url);
 
   event.waitUntil((async () => {
     const abas = await self.clients.matchAll({ type: "window", includeUncontrolled: true });

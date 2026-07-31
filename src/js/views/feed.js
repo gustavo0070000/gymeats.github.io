@@ -57,7 +57,7 @@ export function feedView({ cid }) {
           : `<div class="banner empty">${esc(challenge.name)}</div>`}
         <div class="standings-strip" data-strip></div>
         <div class="feed-counter" data-counter></div>
-        <pre class="feed-debug" data-debug style="font-size:11px;margin:6px;padding:6px;background:rgba(0,0,0,0.04);color:#111;white-space:pre-wrap;max-height:160px;overflow:auto"></pre>`;
+        <pre class="feed-debug" data-debug style="font-size:11px;margin:6px;padding:6px;background:var(--fill);color:var(--text);white-space:pre-wrap;max-height:160px;overflow:auto"></pre>`;
     }
 
     // O placar mostra PONTOS: cozinhar vale mais que comprar, e o bônus de
