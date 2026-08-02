@@ -82,6 +82,12 @@ export function pointsLabel(n) {
   return `${formatPoints(v)} ${v === 1 ? "pt" : "pts"}`;
 }
 
+/** "1.240 kcal" — separador de milhar, sem casa decimal. */
+export function formatKcal(n) {
+  const v = Math.round(Number(n) || 0);
+  return `${v.toLocaleString("pt-BR")} kcal`;
+}
+
 export function formatMoney(n) {
   const v = Number(n);
   if (!isFinite(v)) return "";

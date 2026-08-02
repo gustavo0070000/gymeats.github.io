@@ -433,3 +433,268 @@ exports.testarNotificacao = onCall(async (request) => {
     detalhe: r.enviadas > 0 ? "" : explicarErro(r.erros, r.limpos),
   };
 });
+
+/* ============================================================
+   Calorias
+
+   O app é estático no GitHub Pages e o repositório é público: não
+   existe lugar seguro pra guardar uma chave de API do lado do
+   cliente. Por isso a chamada ao Gemini mora aqui, com a chave no
+   Secret Manager, e o app só pede "estima esse prato".
+
+   A foto nem sai do cliente: a função lê a que já está no Firestore.
+   ============================================================ */
+
+const { defineSecret } = require("firebase-functions/params");
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+
+const MODELO = "gemini-3.6-flash";
+
+// Teto por pessoa por dia. O grupo posta poucas vezes ao dia; isto existe
+// pra um bug em laço nunca virar conta nem queimar a cota gratuita.
+const LIMITE_DIARIO = 25;
+
+const INSTRUCAO = [
+  "Você estima calorias de pratos de comida a partir de uma foto.",
+  "Responda SEMPRE em português do Brasil.",
+  "Estime a porção pelo que aparece na foto, usando prato, talher ou copo como referência de tamanho.",
+  "Devolva uma FAIXA honesta em kcalMin/kcalMax: quanto menos der pra ver, mais larga a faixa.",
+  "kcal é o valor central que você considera mais provável.",
+  "Se a imagem não for comida, devolva itens vazio, kcal 0 e confianca \"baixa\".",
+].join("\n");
+
+const ESQUEMA = {
+  type: "object",
+  properties: {
+    itens: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          nome: { type: "string" },
+          porcao: { type: "string" },
+          kcal: { type: "integer" },
+        },
+        required: ["nome", "porcao", "kcal"],
+      },
+    },
+    kcal: { type: "integer" },
+    kcalMin: { type: "integer" },
+    kcalMax: { type: "integer" },
+    confianca: { type: "string", enum: ["alta", "media", "baixa"] },
+    observacao: { type: "string" },
+  },
+  required: ["itens", "kcal", "kcalMin", "kcalMax", "confianca"],
+};
+
+/** Chave da base de alimentos. Um prato só é "o mesmo" no mesmo lugar. */
+function chaveDoAlimento(post) {
+  const slug = String(post.title || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
+  if (!slug) return null;
+  // Comprado: o lugar define a porção. Caseiro: quem cozinhou define.
+  const onde = post.homemade ? `casa:${post.uid}` : (post.placeKey || "");
+  return onde ? `${onde}|${slug}` : null;
+}
+
+/** Quantas estimativas a pessoa já pediu hoje. */
+async function dentroDoLimite(uid) {
+  const hoje = chaveDoDia(agoraEmBrasilia());
+  const ref = db.doc(`users/${uid}/uso/${hoje}`);
+  const snap = await ref.get();
+  const n = snap.exists ? (snap.data().estimativas || 0) : 0;
+  if (n >= LIMITE_DIARIO) return false;
+  await ref.set({ estimativas: FieldValue.increment(1) }, { merge: true });
+  return true;
+}
+
+async function pedirAoGemini(base64, mimeType, descricao) {
+  const corpo = {
+    systemInstruction: { parts: [{ text: INSTRUCAO }] },
+    contents: [{
+      role: "user",
+      parts: [
+        { inlineData: { mimeType, data: base64 } },
+        { text: `Descrição de quem postou: ${descricao || "(nenhuma)"}` },
+      ],
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: ESQUEMA,
+      temperature: 0.2,
+    },
+  };
+
+  const resposta = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "x-goog-api-key": GEMINI_API_KEY.value(),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(corpo),
+    });
+
+  if (!resposta.ok) {
+    const detalhe = await resposta.text();
+    console.error(`gemini ${resposta.status}: ${detalhe.slice(0, 500)}`);
+    const e = new Error("gemini");
+    e.status = resposta.status;
+    throw e;
+  }
+
+  const json = await resposta.json();
+  const texto = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text).join("");
+  console.log(`gemini ok, tokens: ${JSON.stringify(json.usageMetadata)}`);
+  return JSON.parse(texto);
+}
+
+/**
+ * Estima as calorias de um prato já publicado.
+ *
+ * Só o autor pede. A resposta vira o gabarito do jogo de palpite, então
+ * quem chuta não pode ver antes — por isso o valor é gravado no post e a
+ * tela é que decide o que mostrar pra quem.
+ */
+exports.estimarCalorias = onCall(
+  { secrets: [GEMINI_API_KEY], timeoutSeconds: 120 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Entre na sua conta.");
+
+    const { cid, pid } = request.data || {};
+    if (!cid || !pid) throw new HttpsError("invalid-argument", "Faltou o prato.");
+
+    const postRef = db.doc(`challenges/${cid}/posts/${pid}`);
+    const postSnap = await postRef.get();
+    if (!postSnap.exists) throw new HttpsError("not-found", "Prato não encontrado.");
+    const post = postSnap.data();
+    if (post.uid !== uid) {
+      throw new HttpsError("permission-denied", "Só quem postou pode estimar.");
+    }
+
+    /* ---- base do grupo: prato repetido não gasta IA ---- */
+    const chave = chaveDoAlimento(post);
+    if (chave) {
+      const cache = await db.doc(`alimentos/${chave}`).get();
+      if (cache.exists) {
+        const a = cache.data();
+        await postRef.update({
+          kcal: a.kcal, kcalMin: a.kcalMin, kcalMax: a.kcalMax,
+          kcalItens: a.itens || [], kcalConfianca: a.confianca || "media",
+          kcalFonte: "base", kcalAt: FieldValue.serverTimestamp(),
+        });
+        console.log(`base: ${chave} (${a.vezes || 1}ª vez)`);
+        return {
+          ok: true, fonte: "base", vezes: a.vezes || 1,
+          kcal: a.kcal, kcalMin: a.kcalMin, kcalMax: a.kcalMax,
+          itens: a.itens || [], confianca: a.confianca || "media",
+        };
+      }
+    }
+
+    if (!await dentroDoLimite(uid)) {
+      throw new HttpsError("resource-exhausted",
+        `Você já pediu ${LIMITE_DIARIO} estimativas hoje. Amanhã tem mais.`);
+    }
+
+    /* ---- a foto não sai do servidor ---- */
+    if (!post.photoId) throw new HttpsError("failed-precondition", "Esse prato não tem foto.");
+    const foto = await db.doc(`photos/${post.photoId}`).get();
+    const dataUrl = foto.exists ? foto.data().data : null;
+    if (!dataUrl) throw new HttpsError("failed-precondition", "Não achei a foto do prato.");
+
+    const m = /^data:([^;]+);base64,(.+)$/s.exec(dataUrl);
+    if (!m) throw new HttpsError("failed-precondition", "Formato de foto inesperado.");
+
+    let out;
+    try {
+      out = await pedirAoGemini(m[2], m[1], post.description || post.title || "");
+    } catch (err) {
+      if (err.status === 429) {
+        throw new HttpsError("resource-exhausted",
+          "A cota do Gemini estourou por agora. Tente daqui a pouco.");
+      }
+      throw new HttpsError("internal", "A IA não respondeu. Tente de novo.");
+    }
+
+    if (!out.itens?.length || !out.kcal) {
+      return { ok: false, motivo: "sem-comida",
+        detalhe: out.observacao || "Não consegui reconhecer comida nessa foto." };
+    }
+
+    await postRef.update({
+      kcal: out.kcal, kcalMin: out.kcalMin, kcalMax: out.kcalMax,
+      kcalItens: out.itens, kcalConfianca: out.confianca,
+      kcalFonte: "ia", kcalAt: FieldValue.serverTimestamp(),
+    });
+
+    // Alimenta a base do grupo. A correção do autor sobrescreve depois.
+    if (chave) {
+      await db.doc(`alimentos/${chave}`).set({
+        nome: post.title || "", placeKey: post.placeKey || "", homemade: !!post.homemade,
+        kcal: out.kcal, kcalMin: out.kcalMin, kcalMax: out.kcalMax,
+        itens: out.itens, confianca: out.confianca,
+        vezes: FieldValue.increment(1),
+        criadoEm: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    return {
+      ok: true, fonte: "ia",
+      kcal: out.kcal, kcalMin: out.kcalMin, kcalMax: out.kcalMax,
+      itens: out.itens, confianca: out.confianca, observacao: out.observacao || "",
+    };
+  });
+
+/**
+ * Correção do autor. Vale mais que o palpite da IA, então sobrescreve
+ * também a base do grupo — é assim que a base fica melhor que o modelo.
+ */
+exports.corrigirCalorias = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Entre na sua conta.");
+
+  const { cid, pid, kcal } = request.data || {};
+  const valor = Math.round(Number(kcal));
+  if (!cid || !pid) throw new HttpsError("invalid-argument", "Faltou o prato.");
+  if (!isFinite(valor) || valor < 0 || valor > 20000) {
+    throw new HttpsError("invalid-argument", "Valor de calorias fora do razoável.");
+  }
+
+  const postRef = db.doc(`challenges/${cid}/posts/${pid}`);
+  const snap = await postRef.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Prato não encontrado.");
+  const post = snap.data();
+  if (post.uid !== uid) throw new HttpsError("permission-denied", "Só quem postou pode corrigir.");
+
+  // A faixa acompanha a correção: manter a antiga faria o número corrigido
+  // aparecer fora da própria faixa.
+  const margem = Math.max(50, Math.round(valor * 0.12));
+  await postRef.update({
+    kcal: valor,
+    kcalMin: Math.max(0, valor - margem),
+    kcalMax: valor + margem,
+    kcalFonte: "manual",
+    kcalAt: FieldValue.serverTimestamp(),
+  });
+
+  const chave = chaveDoAlimento(post);
+  if (chave) {
+    await db.doc(`alimentos/${chave}`).set({
+      nome: post.title || "", placeKey: post.placeKey || "", homemade: !!post.homemade,
+      kcal: valor,
+      kcalMin: Math.max(0, valor - margem),
+      kcalMax: valor + margem,
+      confianca: "alta",
+      corrigidoPor: uid,
+      corrigidoEm: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+  return { ok: true, kcal: valor };
+});

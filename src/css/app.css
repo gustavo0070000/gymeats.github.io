@@ -1875,3 +1875,35 @@ button.stat:active { opacity: .6; }
 /* Cabeçalho de dia no feed vira botão pra lista daquele dia. */
 .day-jump { display: block; width: 100%; background: none; }
 .day-jump:active { opacity: .55; }
+
+/* ---------- Calorias ---------- */
+
+.kcal-faixa {
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 700;
+  margin-top: -4px;
+  padding-bottom: 4px;
+}
+.kcal-itens {
+  margin: 8px 0 4px;
+  border-top: 1px solid var(--divider);
+}
+.kcal-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: 15px;
+  font-weight: 700;
+}
+.kcal-item:last-child { border-bottom: none; }
+.kcal-item span { flex: 1; min-width: 0; }
+.kcal-item i {
+  font-style: normal;
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.kcal-item b { flex: 0 0 auto; }

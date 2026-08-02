@@ -12,7 +12,7 @@ import { plateLink } from "./plates.js";
 
 import {
   MEALS, mealById, CUISINES, cuisineById,
-  formatPoints, formatMoney, formatRating, guessWinners, basePoints,
+  formatPoints, formatMoney, formatRating, formatKcal, guessWinners, basePoints,
 } from "../food.js";
 
 const EMOJIS = ["🔥", "😍", "🤤", "👏", "😂", "🤮", "💀", "🐐"];
@@ -438,6 +438,99 @@ export function postView({ cid, pid }) {
   };
 
   /* Palpite de preço: o valor só aparece depois que você chuta. */
+  /* ============================================================
+     Calorias
+
+     Mesma mecânica do chute de preço: o número real fica escondido até
+     você chutar. Quem postou pede a estimativa e pode corrigir — a
+     correção é o que faz a base do grupo ficar melhor que a IA.
+     ============================================================ */
+
+  const kcalBlock = () => {
+    const myUid = store.uid();
+    const isMine = post.uid === myUid;
+    const temFoto = !!post.photoId;
+
+    if (!post.kcal) {
+      if (!isMine) return "";
+      return `
+        <div class="card guess-card">
+          <div class="guess-title">🔥 Calorias</div>
+          <div class="hint-row" style="padding-top:0">
+            ${temFoto
+              ? "A IA olha a foto e chuta. Depois você corrige se ela errar — e a galera pode tentar adivinhar antes."
+              : "Sem foto não dá pra estimar."}
+          </div>
+          ${temFoto ? `<div class="pad" style="padding:10px 0 0">
+            <button class="btn btn-primary" data-estimar>✨ Estimar calorias</button>
+          </div>` : ""}
+        </div>`;
+    }
+
+    const palpites = post.kcalGuesses || {};
+    const meu = palpites[myUid];
+    const revelado = isMine || meu != null;
+    const campeoes = new Set(guessWinners(palpites, post.kcal).map((g) => g.uid));
+
+    if (!revelado) {
+      return `
+        <div class="card guess-card">
+          <div class="guess-title">🔥 Quantas calorias você acha que tem?</div>
+          <div class="guess-row">
+            <input data-kcal-guess type="number" inputmode="numeric" min="1" step="10" placeholder="kcal">
+            <button class="btn btn-primary" data-kcal-send style="width:auto;padding:12px 22px">Chutar</button>
+          </div>
+          <div class="hint-row">O valor real só aparece depois do seu chute.</div>
+        </div>`;
+    }
+
+    const lista = Object.entries(palpites)
+      .sort((a, b) => Math.abs(a[1] - post.kcal) - Math.abs(b[1] - post.kcal));
+
+    const fonte = {
+      ia: "estimado por IA",
+      base: "da base do grupo",
+      manual: "confirmado por quem postou",
+    }[post.kcalFonte] || "estimado";
+
+    const faixa = post.kcalMin && post.kcalMax && post.kcalMin !== post.kcalMax
+      ? `<div class="kcal-faixa">entre ${formatKcal(post.kcalMin)} e ${formatKcal(post.kcalMax)} · ${fonte}</div>`
+      : `<div class="kcal-faixa">${fonte}</div>`;
+
+    const itens = (post.kcalItens || []).length ? `
+      <div class="kcal-itens">
+        ${post.kcalItens.map((i) => `
+          <div class="kcal-item">
+            <span>${esc(i.nome)}${i.porcao ? ` <i>${esc(i.porcao)}</i>` : ""}</span>
+            <b>${formatKcal(i.kcal)}</b>
+          </div>`).join("")}
+      </div>` : "";
+
+    return `
+      <div class="card guess-card">
+        <div class="guess-title">🔥 <strong>${formatKcal(post.kcal)}</strong></div>
+        ${faixa}
+        ${itens}
+        ${lista.length ? `<div class="guess-list">
+          ${lista.map(([u, v]) => `
+            <div class="guess-item ${campeoes.has(u) ? "win" : ""}">
+              <span class="who">${u === myUid ? "Você" : esc(nameOf(u))}</span>
+              <span class="val">${formatKcal(v)}</span>
+              <span class="off">${campeoes.has(u)
+                ? "🏆"
+                : `${v > post.kcal ? "+" : "−"}${Math.abs(v - post.kcal).toLocaleString("pt-BR")}`}</span>
+            </div>`).join("")}
+        </div>
+        ${campeoes.size > 1 ? `<div class="hint-row">Empate: ${campeoes.size} palpites na mesma distância.</div>` : ""}`
+        : `<div class="hint-row">Ninguém chutou ainda.</div>`}
+        ${isMine ? `<div class="pad" style="padding:8px 0 0">
+          <button class="btn btn-white" data-corrigir-kcal>Corrigir o valor</button>
+        </div>
+        <div class="hint-row">Estimativa por foto erra bastante. Sua correção
+          vira a referência do grupo pra esse prato.</div>` : ""}
+      </div>`;
+  };
+
   const priceBlock = () => {
     if (!post.price) return "";
     const myUid = store.uid();
@@ -531,6 +624,7 @@ export function postView({ cid, pid }) {
 
       ${ratingBlock()}
       ${priceBlock()}
+      ${kcalBlock()}
 
       <div style="border-top:1px solid var(--divider);padding-top:6px" data-comments></div>
       <div style="height:12px"></div>`;
@@ -557,6 +651,46 @@ export function postView({ cid, pid }) {
         e.currentTarget.disabled = false;
         toastError(err?.message || "Não deu pra chutar.");
       }
+    });
+
+    body.querySelector("[data-kcal-send]")?.addEventListener("click", async (e) => {
+      const input = body.querySelector("[data-kcal-guess]");
+      const value = parseInt(input.value, 10);
+      if (!isFinite(value) || value <= 0) return toastError("Bota um número.");
+      e.currentTarget.disabled = true;
+      try {
+        await store.guessKcal(cid, pid, value);
+      } catch (err) {
+        e.currentTarget.disabled = false;
+        toastError(err?.message || "Não deu pra chutar.");
+      }
+    });
+
+    body.querySelector("[data-estimar]")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Olhando a foto…";
+      const r = await store.estimarCalorias(cid, pid);
+      if (r?.ok) {
+        toast(r.fonte === "base"
+          ? "Esse prato já estava na base do grupo."
+          : "Pronto! Confere e corrige se estiver longe.");
+      } else {
+        btn.disabled = false;
+        btn.textContent = "✨ Estimar calorias";
+        toastError(r?.detalhe || "Não deu pra estimar.");
+      }
+    });
+
+    body.querySelector("[data-corrigir-kcal]")?.addEventListener("click", async () => {
+      const atual = post.kcal || "";
+      const valor = prompt("Quantas calorias tinha de verdade?", atual);
+      if (valor == null) return;
+      const n = parseInt(String(valor).replace(/[^0-9]/g, ""), 10);
+      if (!isFinite(n) || n <= 0) return toastError("Bota um número.");
+      const r = await store.corrigirCalorias(cid, pid, n);
+      if (r?.ok) toast("Corrigido — e a base do grupo aprendeu.");
+      else toastError(r?.detalhe || "Não deu pra corrigir.");
     });
 
     body.querySelector("[data-add-react]").addEventListener("click", async () => {

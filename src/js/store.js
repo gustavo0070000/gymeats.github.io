@@ -2,6 +2,7 @@ import {
   db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch, runTransaction, deleteField,
+  callable,
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
 import {
@@ -620,6 +621,56 @@ export async function ratePost(cid, pid, value) {
 }
 
 /* ---------- Palpite de preço ---------- */
+
+/* ---------- Calorias ---------- */
+
+/**
+ * Pede a estimativa ao servidor. A chave do Gemini vive só na Cloud
+ * Function: o app é estático e público, aqui não há onde escondê-la.
+ */
+export async function estimarCalorias(cid, pid) {
+  try {
+    const { data } = await callable("estimarCalorias")({ cid, pid });
+    return data;
+  } catch (err) {
+    return { ok: false, motivo: err?.code || "erro", detalhe: mensagemDeErro(err) };
+  }
+}
+
+/** Correção do autor — vale mais que a IA e atualiza a base do grupo. */
+export async function corrigirCalorias(cid, pid, kcal) {
+  try {
+    const { data } = await callable("corrigirCalorias")({ cid, pid, kcal });
+    return data;
+  } catch (err) {
+    return { ok: false, motivo: err?.code || "erro", detalhe: mensagemDeErro(err) };
+  }
+}
+
+function mensagemDeErro(err) {
+  if (err?.code === "functions/not-found") {
+    return "A função ainda não foi publicada. Rode o deploy das funções.";
+  }
+  if (err?.code === "functions/resource-exhausted") return err.message;
+  return err?.message || "Não consegui falar com o servidor.";
+}
+
+/** Palpite de calorias — mesma mecânica do chute de preço. */
+export async function guessKcal(cid, pid, value) {
+  const id = uid();
+  const amount = Math.round(Number(value));
+  if (!isFinite(amount) || amount <= 0) throw new Error("Valor inválido.");
+
+  const postRef = doc(db, "challenges", cid, "posts", pid);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(postRef);
+    if (!snap.exists()) return;
+    const post = snap.data();
+    if (post.uid === id) throw new Error("Você já sabe quantas são.");
+    if ((post.kcalGuesses || {})[id] != null) throw new Error("Você já chutou.");
+    tx.update(postRef, { kcalGuesses: { ...(post.kcalGuesses || {}), [id]: amount } });
+  });
+}
 
 export async function guessPrice(cid, pid, value) {
   const id = uid();

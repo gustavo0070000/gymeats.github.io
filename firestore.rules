@@ -43,6 +43,12 @@ service cloud.firestore {
       match /pushTokens/{tokenId} {
         allow read, write: if isSelf(uid);
       }
+
+      // Contador diário de estimativas — escrito só pela função.
+      match /uso/{dia} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
     }
 
     // ---------- Códigos de convite ----------
@@ -99,7 +105,8 @@ service cloud.firestore {
                         resource.data.uid == request.auth.uid ||
                         request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['reactions', 'commentCount', 'ratings',
-                                    'ratingAvg', 'ratingCount', 'guesses']) ||
+                                    'ratingAvg', 'ratingCount', 'guesses',
+                                    'kcalGuesses']) ||
                         (isOwner(cid) && request.resource.data.diff(resource.data)
                           .affectedKeys().hasOnly(['at', 'dayKey', 'dateEditada',
                                                    'place', 'placeKey', 'coords']))
@@ -144,6 +151,15 @@ service cloud.firestore {
     // Ficam numa coleção própria pro feed não precisar baixá-las.
     // O id é aleatório e imprevisível; qualquer pessoa logada que tenha
     // o id pode ler (é o que permite o feed funcionar sem consultas caras).
+    // ---------- Base de alimentos do grupo ----------
+    // Quem escreve é só a Cloud Function (admin SDK ignora estas regras).
+    // Deixar o cliente gravar aqui abriria a porta pra alguém plantar
+    // caloria errada num prato que todo mundo repete.
+    match /alimentos/{chave} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
     match /photos/{photoId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
