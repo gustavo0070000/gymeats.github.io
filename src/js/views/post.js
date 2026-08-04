@@ -6,7 +6,7 @@ import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
 import { compress, thumbnail, microThumbnail } from "../image.js";
-import { PHOTO } from "../config.js";
+import { PHOTO, APP_VERSION } from "../config.js";
 import { pickPlace } from "./place-picker.js";
 import { plateLink } from "./plates.js";
 
@@ -166,6 +166,8 @@ export function composeView({ cid }) {
             </div>
           </div>
 
+          <div class="card falha-card" data-falha hidden></div>
+
           <div class="card">
             <label class="field">
               <input data-title placeholder="Título" maxlength="80" autocomplete="off">
@@ -306,6 +308,45 @@ export function composeView({ cid }) {
     el.querySelector("[data-back]").addEventListener("click", () => showCamera());
     el.querySelector("[data-change]").addEventListener("click", () => showCamera());
 
+    /**
+     * Mostra o motivo real da falha, fixo na tela e copiável.
+     * Toast some antes de dar tempo de ler, e num celular não dá pra abrir
+     * o console — sem isto, uma falha que só acontece com uma pessoa é
+     * impossível de diagnosticar à distância.
+     */
+    function mostrarFalha(err, etapa = "") {
+      const codigo = err?.code || err?.name || "sem-código";
+      const recado = err?.message || String(err);
+      const dica = {
+        "permission-denied": "As regras do Firestore recusaram. Provavelmente falta publicar a versão nova das regras.",
+        "unavailable": "Sem conexão com o Firestore agora.",
+        "invalid-argument": "O Firestore recusou algum campo do prato.",
+        "resource-exhausted": "Cota do Firestore estourada.",
+        "failed-precondition": "O Firestore pediu algo que falta — normalmente um índice.",
+        "deadline-exceeded": "Demorou demais. Foto muito pesada ou internet ruim.",
+      }[String(codigo).replace(/^firestore\//, "")] || "";
+
+      const texto = `GymEats ${APP_VERSION}\netapa: ${etapa}\ncódigo: ${codigo}\n${recado}`;
+      const caixa = el.querySelector("[data-falha]");
+      caixa.hidden = false;
+      caixa.innerHTML = `
+        <div class="falha-titulo">Não deu pra publicar</div>
+        ${dica ? `<div class="falha-dica">${esc(dica)}</div>` : ""}
+        <div class="falha-codigo">${esc(codigo)}${etapa ? ` · ao ${esc(etapa)}` : ""}</div>
+        <div class="falha-msg">${esc(recado)}</div>
+        <button class="btn btn-white" data-copiar-falha>Copiar erro</button>`;
+      caixa.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      caixa.querySelector("[data-copiar-falha]").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(texto);
+          toast("Erro copiado — manda pro Gustavo.");
+        } catch {
+          toastError("Não deu pra copiar. Manda um print.");
+        }
+      });
+    }
+
     el.querySelector("[data-publish]").addEventListener("click", async (e) => {
       const title = el.querySelector("[data-title]").value.trim();
       if (!capturedFile) return toastError("Sem foto não vale — bota o prato aí.");
@@ -314,12 +355,16 @@ export function composeView({ cid }) {
       const btn = e.currentTarget;
       btn.disabled = true;
       btn.textContent = "Enviando…";
+      // Saber a etapa muda o diagnóstico: comprimir é problema de foto,
+      // gravar é problema de regra ou de rede.
+      let etapa = "preparar a foto";
       try {
         const [photo, thumb, micro] = await Promise.all([
           compress(capturedFile, { maxEdge: PHOTO.maxEdge, maxBytes: PHOTO.maxBytes }),
           thumbnail(capturedFile),
           microThumbnail(capturedFile),   // é esta que vai na notificação
         ]);
+        etapa = `gravar o prato (foto de ${Math.round(photo.length / 1024)} KB)`;
         const day = campoDia.value || dayKey(new Date());
         const time = campoHora.value || "12:00";
         // Só conta como escolha deliberada se a pessoa realmente mexeu.
@@ -342,7 +387,10 @@ export function composeView({ cid }) {
       } catch (err) {
         btn.disabled = false;
         btn.textContent = "Publicar";
-        toastError("Não deu pra publicar. Tenta de novo.");
+        // "Tenta de novo" escondia o motivo, e sem o motivo não dá pra
+        // consertar nada — ainda mais quando falha só pra uma pessoa.
+        console.error(`publicar (${etapa}):`, err);
+        mostrarFalha(err, etapa);
         console.error(err);
       }
     });
