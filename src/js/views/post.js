@@ -5,7 +5,7 @@ import {
 import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
-import { compress, thumbnail, microThumbnail } from "../image.js";
+import { prepararFotos } from "../image.js";
 import { PHOTO, APP_VERSION } from "../config.js";
 import { pickPlace } from "./place-picker.js";
 import { plateLink } from "./plates.js";
@@ -359,11 +359,12 @@ export function composeView({ cid }) {
       // gravar é problema de regra ou de rede.
       let etapa = "preparar a foto";
       try {
-        const [photo, thumb, micro] = await Promise.all([
-          compress(capturedFile, { maxEdge: PHOTO.maxEdge, maxBytes: PHOTO.maxBytes }),
-          thumbnail(capturedFile),
-          microThumbnail(capturedFile),   // é esta que vai na notificação
-        ]);
+        // Uma decodificação só para as três saídas. Em paralelo, cada uma
+        // decodificava a foto original de novo, e o pico de memória
+        // triplicado derrubava aparelho com câmera grande.
+        const { photo, thumb, micro } = await prepararFotos(capturedFile, {
+          maxEdge: PHOTO.maxEdge, maxBytes: PHOTO.maxBytes,
+        });
         etapa = `gravar o prato (foto de ${Math.round(photo.length / 1024)} KB)`;
         const day = campoDia.value || dayKey(new Date());
         const time = campoHora.value || "12:00";

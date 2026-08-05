@@ -2,6 +2,10 @@
 // A foto vira um data URL (base64) que cabe num documento do Firestore
 // (teto do Firestore é 1 MiB por documento — trabalhamos bem abaixo disso).
 
+// Maior lado do canvas intermediário. Tudo que o app gera sai deste canvas,
+// então a foto original é decodificada uma vez só.
+const TRABALHO_MAX = 1080;
+
 const MIME = (() => {
   const c = document.createElement("canvas");
   c.width = c.height = 1;
@@ -9,19 +13,33 @@ const MIME = (() => {
 })();
 
 async function loadBitmap(file) {
-  // `from-image` respeita o EXIF (foto de celular deitada)
+  const kb = Math.round((file?.size || 0) / 1024);
+
+  // `from-image` respeita o EXIF (foto de celular deitada).
+  // Se a decodificação cheia falhar — foto de 50 MP num aparelho sem RAM
+  // sobrando —, tenta de novo pedindo pro próprio navegador reduzir na
+  // decodificação, que custa bem menos memória.
   if (typeof createImageBitmap === "function") {
-    try {
-      return await createImageBitmap(file, { imageOrientation: "from-image" });
-    } catch { /* cai no fallback */ }
+    for (const opcoes of [
+      { imageOrientation: "from-image" },
+      { imageOrientation: "from-image", resizeWidth: TRABALHO_MAX, resizeQuality: "medium" },
+      { imageOrientation: "from-image", resizeHeight: TRABALHO_MAX, resizeQuality: "medium" },
+    ]) {
+      try {
+        return await createImageBitmap(file, opcoes);
+      } catch { /* tenta a próxima */ }
+    }
   }
+
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
     img.decoding = "async";
     await new Promise((ok, fail) => {
       img.onload = ok;
-      img.onerror = () => fail(new Error("Não consegui ler essa imagem."));
+      img.onerror = () => fail(new Error(
+        `Não consegui ler essa imagem (${file?.type || "tipo desconhecido"}, ${kb} KB). `
+        + "Tente escolher a foto pela galeria, ou tire outra."));
       img.src = url;
     });
     return img;
@@ -64,41 +82,63 @@ const toDataURL = (canvas, quality) =>
   });
 
 /**
- * Comprime até caber em maxBytes, baixando qualidade e depois resolução.
- * Retorna um data URL.
+ * Uma decodificação só, já reduzida ao tamanho de trabalho.
+ *
+ * Antes cada saída (foto, miniatura, micro) decodificava o arquivo
+ * original por conta própria — e o post fazia as três em paralelo. Numa
+ * câmera de 50 MP isso é decodificar três imagens gigantes ao mesmo
+ * tempo, e num aparelho sem RAM sobrando as três falham juntas. Era o
+ * "Não consegui ler essa imagem" que travava um membro do grupo.
  */
-export async function compress(file, { maxEdge = 1080, maxBytes = 700 * 1024, square = false } = {}) {
+async function canvasDeTrabalho(file) {
   const bitmap = await loadBitmap(file);
-  let edge = maxEdge;
+  try {
+    return draw(bitmap, TRABALHO_MAX, false);
+  } finally {
+    bitmap.close?.();   // libera a original antes de gerar qualquer saída
+  }
+}
 
+/** Reduz qualidade e depois resolução até caber em maxBytes. */
+async function comprimirDe(fonte, { maxEdge = 1080, maxBytes = 700 * 1024, square = false } = {}) {
+  let edge = maxEdge;
   for (let pass = 0; pass < 5; pass++) {
-    const canvas = draw(bitmap, edge, square);
+    const canvas = draw(fonte, edge, square);
     for (const q of [0.75, 0.62, 0.5, 0.4]) {
       const url = await toDataURL(canvas, q);
-      if (url.length <= maxBytes) {
-        bitmap.close?.();
-        return url;
-      }
+      if (url.length <= maxBytes) return url;
     }
     edge = Math.round(edge * 0.75);
   }
-
   // Último recurso: bem pequena, mas garantidamente dentro do limite.
-  const url = await toDataURL(draw(bitmap, 480, square), 0.4);
-  bitmap.close?.();
-  return url;
+  return toDataURL(draw(fonte, 480, square), 0.4);
 }
 
-/** Miniatura quadrada minúscula (~5 KB) que fica embutida no post, pro feed carregar rápido. */
+/** Comprime até caber em maxBytes. Retorna um data URL. */
+export async function compress(file, opcoes = {}) {
+  return comprimirDe(await canvasDeTrabalho(file), opcoes);
+}
+
+/**
+ * As três saídas de um prato, de uma decodificação só.
+ * É o caminho que o post usa; separado, ele multiplicava por três o pico
+ * de memória sem nenhum ganho.
+ */
+export async function prepararFotos(file, { maxEdge = 1080, maxBytes = 700 * 1024 } = {}) {
+  const fonte = await canvasDeTrabalho(file);
+  return {
+    photo: await comprimirDe(fonte, { maxEdge, maxBytes }),
+    thumb: await comprimirDe(fonte, { maxEdge: 160, maxBytes: 14 * 1024, square: true }),
+    micro: await comprimirDe(fonte, { maxEdge: 96, maxBytes: 2400, square: true }),
+  };
+}
+
+/** Miniatura quadrada minúscula (~5 KB) que fica embutida no post. */
 export function thumbnail(file) {
   return compress(file, { maxEdge: 160, maxBytes: 14 * 1024, square: true });
 }
 
-/**
- * Versão ainda menor, pra viajar dentro da notificação push.
- * O campo de dados do FCM tem teto de 4 KB no total, então a miniatura do
- * feed não cabe — esta precisa ficar abaixo de ~2,5 KB sozinha.
- */
+/** Menor ainda: cabe no orçamento de 4 KB do payload da notificação. */
 export function microThumbnail(file) {
   return compress(file, { maxEdge: 96, maxBytes: 2400, square: true });
 }
