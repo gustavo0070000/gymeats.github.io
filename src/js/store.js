@@ -147,12 +147,29 @@ export async function joinByCode(rawCode) {
   if (!codeSnap.exists()) throw new Error("Não achei nenhum desafio com esse código.");
   const cid = codeSnap.data().challengeId;
 
+  const challengeRef = doc(db, "challenges", cid);
   const memberRef = doc(db, "challenges", cid, "members", u.uid);
-  const memberSnap = await getDoc(memberRef);
+
+  /* A ordem aqui importa e antes estava errada.
+     A ficha de membro só é legível por quem já é membro, e o código lia a
+     ficha ANTES de entrar — o que dá permission-denied em quem está
+     entrando pela primeira vez. Ninguém esbarrou enquanto as regras não
+     estavam publicadas; a primeira pessoa a entrar depois disso travou.
+
+     Ler o desafio serve de teste de membro: quem não é, é recusado, e aí
+     entramos. Quem já é passa direto — reenviar o mesmo memberUids seria
+     recusado pela regra, que só aceita entrar ou sair. */
+  const jaEra = await getDoc(challengeRef).then((s) => s.exists()).catch(() => false);
+  if (!jaEra) await updateDoc(challengeRef, { memberUids: arrayUnion(u.uid) });
+
+  // Agora dá pra olhar a ficha sem risco de apagar o placar de quem volta.
+  let ficha = null;
+  try {
+    ficha = await getDoc(memberRef);
+  } catch { /* segue sem: o ramo abaixo é conservador */ }
 
   const batch = writeBatch(db);
-  batch.update(doc(db, "challenges", cid), { memberUids: arrayUnion(u.uid) });
-  if (!memberSnap.exists()) {
+  if (ficha && !ficha.exists()) {
     batch.set(memberRef, {
       name: u.name, photo: u.photo, role: "member",
       days: [], dayPoints: {}, cuisines: [], jokerDays: [],
@@ -160,11 +177,12 @@ export async function joinByCode(rawCode) {
       total: 0, totalPoints: 0, joinedAt: serverTimestamp(),
     });
   } else {
-    batch.update(memberRef, {
-      name: u.name, photo: u.photo,
-    });
+    // Sem certeza de que a ficha é nova, mexe só no nome e na foto —
+    // zerar o placar de quem voltou seria bem pior que não atualizar.
+    batch.set(memberRef, { name: u.name, photo: u.photo }, { merge: true });
   }
-  batch.update(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) });
+  // set com merge em vez de update: a conta pode ter acabado de ser criada.
+  batch.set(doc(db, "users", u.uid), { challengeIds: arrayUnion(cid) }, { merge: true });
   await batch.commit();
 
   return cid;
