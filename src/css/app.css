@@ -1935,3 +1935,64 @@ button.stat:active { opacity: .6; }
   max-height: 120px;
   overflow: auto;
 }
+
+/* ---------- Painel administrativo ---------- */
+
+.graf svg { width: 100%; height: 92px; display: block; }
+.graf .barra { fill: var(--red); }
+.graf .barra.vazia { fill: var(--track); }
+.graf-eixo {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+.graf-legenda {
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+.graf-sub { color: var(--text-3); font-size: 11.5px; font-weight: 700; margin-top: 1px; }
+
+.log-card { padding: 14px 16px; }
+.log-topo { display: flex; align-items: center; gap: 8px; }
+.log-tipo {
+  background: var(--red-soft);
+  color: var(--red-ink);
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+.log-n { margin-left: auto; font-weight: 800; color: var(--text-2); }
+.log-codigo {
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--red);
+  word-break: break-word;
+}
+.log-msg {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+.log-meta { margin-top: 8px; color: var(--text-2); font-size: 12.5px; font-weight: 700; line-height: 1.5; }
+.log-mais { margin: 10px 0; }
+.log-mais summary { color: var(--red); font-weight: 700; font-size: 14px; cursor: pointer; }
+.log-oco { padding: 8px 0; border-bottom: 1px solid var(--divider); font-size: 13px; font-weight: 700; }
+.log-oco:last-child { border-bottom: none; }
+.log-ua {
+  color: var(--text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  word-break: break-all;
+  margin-top: 2px;
+}

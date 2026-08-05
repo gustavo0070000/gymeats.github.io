@@ -391,6 +391,7 @@ export function composeView({ cid }) {
         // "Tenta de novo" escondia o motivo, e sem o motivo não dá pra
         // consertar nada — ainda mais quando falha só pra uma pessoa.
         console.error(`publicar (${etapa}):`, err);
+        store.registrarErro("publicar", err, { etapa, versao: APP_VERSION });
         mostrarFalha(err, etapa);
         console.error(err);
       }

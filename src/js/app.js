@@ -17,6 +17,7 @@ import { datesView } from "./views/dates.js";
 import { notificationsView } from "./views/notifications.js";
 import { sentView } from "./views/sent.js";
 import { platesView } from "./views/plates.js";
+import { adminView } from "./views/admin.js";
 
 const appEl = document.getElementById("app");
 
@@ -43,6 +44,7 @@ route("/novo", guard(newChallengeView));
 route("/entrar", guard(joinView));
 route("/conta", guard(accountView));
 route("/notificacoes", guard(notificationsView));
+route("/admin", guard(adminView));
 
 route("/c/:cid", guard(feedView));
 route("/c/:cid/detalhes", guard(detailsView));

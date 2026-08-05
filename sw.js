@@ -3,7 +3,7 @@
 // e instantaneamente; os dados vêm do Firestore, que tem o próprio cache
 // em IndexedDB. Nunca cacheamos chamadas de rede do Firebase.
 
-const VERSION = "v24";
+const VERSION = "v25";
 const SHELL = `gymeats-shell-${VERSION}`;
 
 // O GitHub Pages serve com "cache-control: max-age=600". Um fetch normal
@@ -40,6 +40,7 @@ const SHELL_FILES = [
   "./src/js/views/notifications.js",
   "./src/js/views/sent.js",
   "./src/js/views/plates.js",
+  "./src/js/views/admin.js",
   "./src/js/views/place-picker.js",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",

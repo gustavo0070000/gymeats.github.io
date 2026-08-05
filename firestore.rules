@@ -28,8 +28,32 @@ service cloud.firestore {
       return signedIn() && request.auth.uid in challengeData(cid).memberUids;
     }
 
+    // Admin do app (eu e a Valentina). A lista mora em admins/{uid} e é
+    // criada à mão no console — nem o próprio admin escreve nela pelo app.
+    function isAdmin() {
+      return signedIn()
+             && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
     function isOwner(cid) {
       return signedIn() && request.auth.uid == challengeData(cid).ownerUid;
+    }
+
+    // ---------- Quem é admin ----------
+    // Leitura liberada pra logados: a tela precisa saber se mostra o painel,
+    // e a lista não revela nada além de dois ids que já são públicos no app.
+    match /admins/{uid} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ---------- Diário de erros ----------
+    // Qualquer um registra o próprio erro; só admin lê. É o que permite
+    // enxergar a falha de quem está do outro lado sem pedir print.
+    match /logs/{logId} {
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow read, delete: if isAdmin();
+      allow update: if false;
     }
 
     // ---------- Perfis ----------
@@ -46,7 +70,7 @@ service cloud.firestore {
 
       // Contador diário de estimativas — escrito só pela função.
       match /uso/{dia} {
-        allow read: if isSelf(uid);
+        allow read: if isSelf(uid) || isAdmin();
         allow write: if false;
       }
     }
@@ -157,7 +181,10 @@ service cloud.firestore {
     // caloria errada num prato que todo mundo repete.
     match /alimentos/{chave} {
       allow read: if signedIn();
+      // Escrita normal é só da Cloud Function; admin pode apagar uma entrada
+      // que a IA envenenou, senão o erro se repete em todo prato igual.
       allow write: if false;
+      allow delete: if isAdmin();
     }
 
     match /photos/{photoId} {

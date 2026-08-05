@@ -1171,3 +1171,104 @@ export function weeklyWins(members) {
     .sort((a, b) => b.wins - a.wins)
     .map((m, i, arr) => ({ ...m, position: arr.findIndex((x) => x.wins === m.wins) + 1 }));
 }
+
+/* ============================================================
+   Painel administrativo
+
+   Dois dias seguidos um bug apareceu só pra uma pessoa e só foi
+   diagnosticado pedindo print. Registrar o erro onde o admin enxerga
+   troca "manda um print" por "já está na tela".
+   ============================================================ */
+
+let ehAdminCache = null;
+
+/** Sou admin do app? A resposta real está nas regras; isto é só a tela. */
+export async function isAdmin() {
+  const id = uid();
+  if (!id) return false;
+  if (ehAdminCache?.uid === id) return ehAdminCache.valor;
+  const valor = await getDoc(doc(db, "admins", id))
+    .then((s) => s.exists()).catch(() => false);
+  ehAdminCache = { uid: id, valor };
+  return valor;
+}
+
+/**
+ * Registra uma falha pra quem administra ver.
+ * Nunca lança: um erro ao gravar o erro não pode virar outro erro na cara
+ * de quem só queria postar o prato.
+ */
+export async function registrarErro(tipo, err, extra = {}) {
+  try {
+    const u = me();
+    if (!u) return;
+    await addDoc(collection(db, "logs"), {
+      uid: u.uid,
+      name: u.name,
+      tipo,
+      codigo: String(err?.code || err?.name || "sem-codigo").slice(0, 80),
+      mensagem: String(err?.message || err || "").slice(0, 500),
+      etapa: String(extra.etapa || "").slice(0, 120),
+      rota: location.hash.slice(0, 120),
+      versao: extra.versao || "",
+      // Ajuda a separar "só no iPhone" de "só num aparelho".
+      ua: navigator.userAgent.slice(0, 180),
+      at: serverTimestamp(),
+    });
+  } catch { /* nunca atrapalha o fluxo de quem está usando */ }
+}
+
+export function watchLogs(cb, max = 100) {
+  const q = query(collection(db, "logs"), orderBy("at", "desc"), limit(max));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
+}
+
+export async function apagarLog(id) {
+  await deleteDoc(doc(db, "logs", id));
+}
+
+/** Conta documentos sem baixá-los — uma foto tem centenas de KB. */
+const contar = async (ref) => {
+  try { return (await getCountFromServer(ref)).data().count; } catch { return null; }
+};
+
+/**
+ * Números do app inteiro.
+ * Tudo por contagem agregada: somar o tamanho das fotos lendo as fotos
+ * custaria centenas de MB de leitura — na tela feita pra vigiar o consumo.
+ */
+export async function metricasGerais() {
+  const [desafios, fotos, alimentos, logs] = await Promise.all([
+    contar(collection(db, "challenges")),
+    contar(collection(db, "photos")),
+    contar(collection(db, "alimentos")),
+    contar(collection(db, "logs")),
+  ]);
+  return { desafios, fotos, alimentos, logs };
+}
+
+/** Consumo de IA de hoje, por pessoa. */
+export async function usoDeIAHoje(uids = []) {
+  const hoje = dayKey();
+  const linhas = await Promise.all(uids.map(async (u) => {
+    const snap = await getDoc(doc(db, "users", u, "uso", hoje)).catch(() => null);
+    return { uid: u, estimativas: snap?.exists() ? (snap.data().estimativas || 0) : 0 };
+  }));
+  return linhas.sort((a, b) => b.estimativas - a.estimativas);
+}
+
+/** Pratos por dia nos últimos N dias, pro gráfico. */
+export function pratosPorDia(posts, dias = 14) {
+  const hoje = new Date();
+  const serie = [];
+  for (let i = dias - 1; i >= 0; i--) {
+    const d = new Date(hoje);
+    d.setDate(d.getDate() - i);
+    const chave = dayKey(d);
+    serie.push({
+      dia: chave,
+      n: (posts || []).filter((p) => postDay(p) === chave).length,
+    });
+  }
+  return serie;
+}

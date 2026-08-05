@@ -302,7 +302,10 @@ export function joinView() {
       navigate(`/c/${cid}`, { replace: true });
     } catch (err) {
       btn.disabled = false;
-      toastError(err?.message || "Código inválido.");
+      store.registrarErro("entrar-desafio", err, { versao: APP_VERSION });
+      toastError(err?.code === "permission-denied"
+        ? "O Firestore recusou. Já registrei o erro pro admin ver."
+        : (err?.message || "Código inválido."));
     }
   });
 
@@ -392,6 +395,17 @@ export function accountView() {
           <span class="label">Notificações</span>
           <span class="chev">${icon("chevron", 18)}</span>
         </button>
+        <button class="list-row" data-admin hidden>
+          <span class="ico">${icon("bolt", 22)}</span>
+          <span class="label">Painel</span>
+          <span class="chev">${icon("chevron", 18)}</span>
+        </button>
+        <button class="list-row" data-copiar-id>
+          <span class="ico">${icon("clipboard", 22)}</span>
+          <span class="label">Meu ID
+            <span class="pref-hint">${esc(String(store.uid() || "").slice(0, 12))}… · toque pra copiar</span>
+          </span>
+        </button>
       </div>
 
       <div class="card list-card">
@@ -412,6 +426,25 @@ export function accountView() {
       </div>`;
 
     body.querySelector("[data-photo]").addEventListener("click", () => fileInput.click());
+    // O painel só aparece pra quem é admin de verdade — mas o cadeado
+    // que vale é o das regras: a rota existe pra todo mundo.
+    store.isAdmin().then((sim) => {
+      const linha = body.querySelector("[data-admin]");
+      if (!linha) return;
+      linha.hidden = !sim;
+      if (sim) linha.addEventListener("click", () => navigate("/admin"));
+    });
+
+    body.querySelector("[data-copiar-id]").addEventListener("click", async () => {
+      const id = store.uid() || "";
+      try {
+        await navigator.clipboard.writeText(id);
+        toast("Seu ID foi copiado.");
+      } catch {
+        toastError(id || "Sem ID.");
+      }
+    });
+
     body.querySelector("[data-save]").addEventListener("click", async (e) => {
       const name = body.querySelector("[data-name]").value.trim();
       if (!name) return toastError("O nome não pode ficar vazio.");

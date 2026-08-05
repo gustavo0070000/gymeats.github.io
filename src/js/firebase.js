@@ -8,6 +8,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch, runTransaction, deleteField,
+  getCountFromServer, collectionGroup,
 } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 
 import { getFunctions, httpsCallable }
@@ -69,4 +70,5 @@ export {
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch, runTransaction, deleteField,
+  getCountFromServer, collectionGroup,
 };
