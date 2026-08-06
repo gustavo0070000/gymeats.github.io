@@ -258,15 +258,23 @@ exports.aoDarNota = onDocumentUpdated(
       .filter((uid) => notasDepois[uid] !== notasAntes[uid] && uid !== depois.uid);
     if (!novos.length) return;
 
-    const quem = novos[novos.length - 1];
-    const nota = notasDepois[quem];
+    /* A notificação NÃO diz quem deu nem quanto foi.
+       No app a nota é anônima — só aparecem média e contagem —, mas o aviso
+       saía com nome e nota, e virou combustível pra revanche: dar nota ruim
+       porque fulano deu nota ruim. Um número sozinho já denuncia: com seis
+       pessoas, "3/10" dez segundos depois de você avaliar o prato do fulano
+       aponta pra uma pessoa só. Por isso some o nome E a nota.
 
-    const membro = await db.doc(`challenges/${cid}/members/${quem}`).get();
+       O total de notas entra no lugar porque é informação que o app já
+       mostra pra todo mundo — não revela nada novo. */
+    const quantas = Object.keys(notasDepois).length;
     const dono = await destinatario(depois.uid, "ratings");
 
     await enviar(dono.tokens, {
-      title: `${primeiroNome(membro.data()?.name)} deu ${nota}/10 no seu prato`,
-      body: depois.title || "",
+      title: "Seu prato recebeu uma nota",
+      body: depois.title
+        ? `${depois.title} · ${quantas} ${quantas === 1 ? "nota" : "notas"} até agora`
+        : `${quantas} ${quantas === 1 ? "nota" : "notas"} até agora`,
       image: imagemDoPrato(depois),
       tag: `post-${pid}`,
       url: rota(`c/${cid}/p/${pid}`),

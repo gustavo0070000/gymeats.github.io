@@ -5,7 +5,10 @@ import {
 import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { navigate } from "../router.js";
-import { CUISINES, formatPoints, pointsLabel } from "../food.js";
+import {
+  cuisinesOf, cuisineById, stampIcon, eventsOf,
+  formatPoints, pointsLabel,
+} from "../food.js";
 import { plateLink } from "./plates.js";
 
 const TABS = [
@@ -64,7 +67,7 @@ export function profileView({ cid, uid: memberUid }) {
         <div class="name">${esc(m.name)}</div>
         ${(m.cuisines || []).length ? `<div class="passport-strip">
           ${(m.cuisines || []).slice(0, 10).map((id) =>
-            `<span>${CUISINES.find((c) => c.id === id)?.emoji || "🍽️"}</span>`).join("")}
+            `<span>${stampIcon(cuisineById(id, challenge), 19)}</span>`).join("")}
           ${(m.cuisines || []).length > 10 ? `<span class="more">+${m.cuisines.length - 10}</span>` : ""}
         </div>` : ""}
       </div>
@@ -154,22 +157,58 @@ export function profileView({ cid, uid: memberUid }) {
 
   function drawPassport(panel, m) {
     const owned = new Set(m.cuisines || []);
+    const daConfig = cuisinesOf(challenge);
+
+    /* Um selo apagado da configuração some da lista de opções, mas quem já
+       carimbou continua com ele — e ele continua contando. Sem isso, apagar
+       um selo faria o passaporte de alguém dizer 25/23. */
+    const aposentados = [...owned]
+      .filter((id) => !daConfig.some((c) => c.id === id))
+      .map((id) => ({ id, label: id, emoji: "🏅", aposentado: true }));
+    const todos = [...daConfig, ...aposentados];
+
+    const eventos = eventsOf(challenge);
+    const fichaEventos = m.eventos || {};
+
     panel.innerHTML = `
       <div class="passport-head">
-        <div class="passport-count">${owned.size}<span>/${CUISINES.length}</span></div>
+        <div class="passport-count">${owned.size}<span>/${todos.length}</span></div>
         <div class="passport-label">carimbos no passaporte</div>
       </div>
       <div class="card"><div class="passport-grid">
-        ${CUISINES.map((c) => `
-          <div class="stamp ${owned.has(c.id) ? "on" : ""}">
-            <span class="flag">${c.emoji}</span>
-            <span class="lbl">${c.label}</span>
+        ${todos.map((c) => `
+          <div class="stamp ${owned.has(c.id) ? "on" : ""} ${c.aposentado ? "aposentado" : ""}">
+            <span class="flag">${stampIcon(c, 26)}</span>
+            <span class="lbl">${esc(c.label)}</span>
           </div>`).join("")}
       </div></div>
       <div class="pad hint-row">
-        Cada cozinha nova que você posta carimba o passaporte. Escolha a cozinha
+        Cada selo novo que você posta carimba o passaporte. Escolha o selo
         na hora de publicar o prato.
-      </div>`;
+        ${aposentados.length ? `${aposentados.length} ${aposentados.length === 1
+          ? "selo já não está" : "selos já não estão"} mais na lista do desafio,
+          mas continuam contando pra você.` : ""}
+      </div>
+
+      ${eventos.length ? `
+        <div class="section-label left">Eventos</div>
+        <div class="card breakdown">
+          ${eventos.map((ev) => {
+            const guardado = fichaEventos[ev.id] || {};
+            const feitas = (guardado.cozinhas || []).length;
+            const need = Math.max(1, Number(ev.need) || 1);
+            const ok = Number(guardado.bonus) > 0;
+            return `
+              <div class="bd-row">
+                <span class="bd-label">${ev.emoji || "🎯"} ${esc(ev.name)}
+                  <div class="bd-conta">${ok
+                    ? `fechado${guardado.dia ? ` em ${esc(guardado.dia)}` : ""}`
+                    : `${feitas}/${need} selos`}</div>
+                </span>
+                <span class="bd-valor">${ok ? `+${pointsLabel(guardado.bonus)}` : `${pointsLabel(ev.bonus)}`}</span>
+              </div>`;
+          }).join("")}
+        </div>` : ""}`;
   }
 
   async function drawCalendar(panel, days, m) {
@@ -287,13 +326,19 @@ export function profileView({ cid, uid: memberUid }) {
       <div class="section-label left">De onde vêm os pontos</div>
       <div class="card breakdown">
         ${statPosts === null ? spinner() : `
-          ${linkLine("👨‍🍳 Cozinhou", pointsLabel(b.caseiros * 2),
+          ${linkLine("👨‍🍳 Cozinhou", `${b.caseiros}`,
             plateLink(cid, { ...todos, feito: "casa" }),
-            `${b.caseiros} ${b.caseiros === 1 ? "prato" : "pratos"} × 2`)}
-          ${linkLine("🛒 Comprou", pointsLabel(b.comprados),
+            `${b.caseiros === 1 ? "prato" : "pratos"}`)}
+          ${linkLine("🛒 Comprou", `${b.comprados}`,
             plateLink(cid, { ...todos, feito: "comprado" }),
-            `${b.comprados} ${b.comprados === 1 ? "prato" : "pratos"} × 1`)}
+            `${b.comprados === 1 ? "prato" : "pratos"}`)}
+          ${line("Pontos dos pratos", pointsLabel(b.base))}
+          ${b.repetidos ? line("🔁 Refeição repetida",
+            `−${pointsLabel(b.perdidoRepetindo)}`,
+            ) : ""}
           ${b.bonus ? line("🔥 Bônus de sequência", `+${pointsLabel(b.bonus)}`) : ""}
+          ${b.cravadas ? line("🎯 Cravou preço/caloria", `+${pointsLabel(b.cravadas)}`) : ""}
+          ${b.eventos ? line("🗓️ Eventos concluídos", `+${pointsLabel(b.eventos)}`) : ""}
           <div class="bd-row total">
             <span class="bd-label">Total</span>
             <span class="bd-valor">${pointsLabel(b.total)}</span>
@@ -313,7 +358,7 @@ export function profileView({ cid, uid: memberUid }) {
       <div class="section-label left">Cozinha</div>
       <div class="card list-card">
         ${line("Taxa de fogão", `${cookRate}%`)}
-        ${line("🌍 Carimbos no passaporte", `${(m.cuisines || []).length}/${CUISINES.length}`)}
+        ${line("🌍 Carimbos no passaporte", `${(m.cuisines || []).length}/${cuisinesOf(challenge).length}`)}
         ${line("🃏 Vale-faltas restantes", m.jokers ?? store.STARTING_JOKERS)}
       </div>`;
 

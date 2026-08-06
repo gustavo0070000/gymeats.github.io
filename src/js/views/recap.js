@@ -6,7 +6,7 @@ import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { plateLink } from "./plates.js";
 import {
-  CUISINES, cuisineById, formatPoints, pointsLabel, formatRating, formatMoney, MIN_RATINGS,
+  cuisineById, stampIcon, formatPoints, pointsLabel, formatRating, formatMoney,
 } from "../food.js";
 
 const PERIODS = [
@@ -91,7 +91,7 @@ export function recapView({ cid }) {
       spent, withPrice,
       gasto: store.spendBreakdown(posts || [], members),
       best: best[0], worst: worst[0],
-      topCuisine: topCuisine ? { ...cuisineById(topCuisine[0]), id: topCuisine[0], n: topCuisine[1] } : null,
+      topCuisine: topCuisine ? { ...cuisineById(topCuisine[0], challenge), id: topCuisine[0], n: topCuisine[1] } : null,
       chef: chef?.cooked ? chef : null,
       longestStreak: longestStreak?.s ? longestStreak : null,
       explorer: explorer?.n ? explorer : null,
@@ -144,7 +144,10 @@ export function recapView({ cid }) {
       const partes = [
         b.caseiros ? `${b.caseiros}× casa` : "",
         b.comprados ? `${b.comprados}× comprado` : "",
-        b.bonus ? `+${formatPoints(b.bonus)} de bônus` : "",
+        b.repetidos ? `${b.repetidos} repetida${b.repetidos === 1 ? "" : "s"}` : "",
+        b.bonus ? `+${formatPoints(b.bonus)} de sequência` : "",
+        b.cravadas ? `+${formatPoints(b.cravadas)} cravando` : "",
+        b.eventos ? `+${formatPoints(b.eventos)} de evento` : "",
       ].filter(Boolean).join(" · ");
 
       return `
@@ -169,14 +172,18 @@ export function recapView({ cid }) {
   function barraDePontos(rows) {
     const soma = rows.reduce((acc, m) => {
       const b = store.pointsBreakdown(fichaDe(m.uid), posts || [], period, challenge);
+      /* Os valores vêm do detalhamento, não de "caseiros × 2": com peso por
+         refeição, multiplicar pelo valor de tabela mentia sempre que alguém
+         postasse uma refeição que vale diferente. */
       return {
-        casa: acc.casa + b.caseiros * 2,
-        comprado: acc.comprado + b.comprados,
+        casa: acc.casa + b.baseCasa,
+        comprado: acc.comprado + b.baseComprado,
         bonus: acc.bonus + b.bonus,
+        extra: acc.extra + b.cravadas + b.eventos,
       };
-    }, { casa: 0, comprado: 0, bonus: 0 });
+    }, { casa: 0, comprado: 0, bonus: 0, extra: 0 });
 
-    const total = soma.casa + soma.comprado + soma.bonus;
+    const total = soma.casa + soma.comprado + soma.bonus + soma.extra;
     if (!total) return "";
     const pct = (v) => `${(v / total) * 100}%`;
 
@@ -185,11 +192,13 @@ export function recapView({ cid }) {
         ${soma.casa ? `<span class="casa" style="width:${pct(soma.casa)}"></span>` : ""}
         ${soma.comprado ? `<span class="comprado" style="width:${pct(soma.comprado)}"></span>` : ""}
         ${soma.bonus ? `<span class="bonus" style="width:${pct(soma.bonus)}"></span>` : ""}
+        ${soma.extra ? `<span class="extra" style="width:${pct(soma.extra)}"></span>` : ""}
       </div>
       <div class="bd-legenda">
         ${soma.casa ? `<span><i style="background:var(--red)"></i>Cozinhado ${pointsLabel(soma.casa)}</span>` : ""}
         ${soma.comprado ? `<span><i style="background:var(--red-soft)"></i>Comprado ${pointsLabel(soma.comprado)}</span>` : ""}
         ${soma.bonus ? `<span><i style="background:#F0C419"></i>Bônus de sequência ${pointsLabel(soma.bonus)}</span>` : ""}
+        ${soma.extra ? `<span><i style="background:var(--green)"></i>Cravadas e eventos ${pointsLabel(soma.extra)}</span>` : ""}
       </div>`;
   }
 
@@ -215,8 +224,8 @@ export function recapView({ cid }) {
           </button>` : ""}
         ${g.porCozinha.length > 1 ? `
           <button class="bd-row" data-nav="${plateLink(cid, { periodo: period, cuisine: g.porCozinha[0].id, preco: "sim", ordem: "caro" })}">
-            <span class="bd-label">${cuisineById(g.porCozinha[0].id)?.emoji || "🍽️"} Cozinha que mais pesou
-              <div class="bd-conta">${esc(cuisineById(g.porCozinha[0].id)?.label || "—")} · ${g.porCozinha[0].n} ${g.porCozinha[0].n === 1 ? "prato" : "pratos"}</div>
+            <span class="bd-label">${stampIcon(cuisineById(g.porCozinha[0].id, challenge), 15)} Selo que mais pesou
+              <div class="bd-conta">${esc(cuisineById(g.porCozinha[0].id, challenge)?.label || g.porCozinha[0].id)} · ${g.porCozinha[0].n} ${g.porCozinha[0].n === 1 ? "prato" : "pratos"}</div>
             </span>
             <span class="bd-valor">${formatMoney(g.porCozinha[0].total)}</span>
           </button>` : ""}
@@ -327,12 +336,12 @@ export function recapView({ cid }) {
           `/c/${cid}/u/${s.longestStreak.uid}`,
           esc(s.longestStreak.name.split(" ")[0])) : ""}
 
-        ${s.explorer ? destaque("🌍", "Mais cozinhas",
+        ${s.explorer ? destaque("🌍", "Mais selos",
           `${s.explorer.n} ${s.explorer.n === 1 ? "carimbo" : "carimbos"}`,
           `/c/${cid}/u/${s.explorer.uid}`,
           esc(s.explorer.name.split(" ")[0])) : ""}
 
-        ${s.topCuisine ? destaque(s.topCuisine.emoji, "Cozinha mais comum",
+        ${s.topCuisine ? destaque(stampIcon(s.topCuisine, 15), "Selo mais comum",
           `${s.topCuisine.n} ${s.topCuisine.n === 1 ? "prato" : "pratos"}`,
           plateLink(cid, { periodo: period, cuisine: s.topCuisine.id }),
           esc(s.topCuisine.label)) : ""}
@@ -379,7 +388,7 @@ export function recapView({ cid }) {
     if (s.best) lines.push(`🏆 Prato do período: "${s.best.title}" de ${s.best.authorName} (⭐ ${formatRating(s.best.ratingAvg)})`);
     if (s.worst && s.worst.id !== s.best?.id) lines.push(`💀 Rango da Vergonha: "${s.worst.title}" de ${s.worst.authorName} (⭐ ${formatRating(s.worst.ratingAvg)})`);
     if (s.longestStreak) lines.push(`🔥 Maior sequência: ${s.longestStreak.name} com ${s.longestStreak.s} dias`);
-    if (s.topCuisine) lines.push(`${s.topCuisine.emoji} Cozinha mais comum: ${s.topCuisine.label}`);
+    if (s.topCuisine) lines.push(`${s.topCuisine.emoji || "🏅"} Selo mais comum: ${s.topCuisine.label}`);
     return lines.join("\n");
   }
 

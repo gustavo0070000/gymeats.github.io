@@ -5,7 +5,8 @@ import { icon } from "../icons.js";
 import * as store from "../store.js";
 import { query, navigate } from "../router.js";
 import {
-  CUISINES, MEALS, cuisineById, mealById, formatRating, formatMoney, formatPoints,
+  cuisinesOf, mealsOf, cuisineById, mealById, stampIcon,
+  formatRating, formatMoney,
 } from "../food.js";
 
 /* ============================================================
@@ -84,11 +85,11 @@ export function platesView({ cid }) {
     const r = [];
     if (filtros.uid) r.push(["uid", `👤 ${nomeDe(filtros.uid)}`]);
     if (filtros.cuisine) {
-      const c = cuisineById(filtros.cuisine);
-      r.push(["cuisine", `${c?.emoji || "🍽️"} ${c?.label || filtros.cuisine}`]);
+      const c = cuisineById(filtros.cuisine, challenge);
+      r.push(["cuisine", `${stampIcon(c, 15)} ${c?.label || filtros.cuisine}`]);
     }
     if (filtros.meal) {
-      const m = mealById(filtros.meal);
+      const m = mealById(filtros.meal, challenge);
       r.push(["meal", `${m?.emoji || "🍽️"} ${m?.label || filtros.meal}`]);
     }
     if (filtros.feito) r.push(["feito", filtros.feito === "casa" ? "👨‍🍳 Cozinhado" : "🛒 Comprado"]);
@@ -130,8 +131,8 @@ export function platesView({ cid }) {
   /* ---------- linha de prato ---------- */
 
   const linha = (p) => {
-    const c = cuisineById(p.cuisine);
-    const m = mealById(p.mealType);
+    const c = cuisineById(p.cuisine, challenge);
+    const m = mealById(p.mealType, challenge);
     const marcas = [
       p.homemade ? "👨‍🍳" : "🛒",
       c?.emoji || "",
@@ -195,6 +196,18 @@ export function platesView({ cid }) {
       </div></div>`;
   }
 
+  /* Um selo ou refeição apagado da configuração continua existindo nos pratos
+     antigos. Sem esta costura, o filtro simplesmente não oferecia como chegar
+     neles — os pratos ficavam invisíveis pra quem procurasse por marca. */
+  function listaComOrfaos(campo, configurados, presentes) {
+    const usados = presentes(campo);
+    const conhecidos = configurados.filter((x) => usados.includes(x.id));
+    const orfaos = usados
+      .filter((id) => !configurados.some((x) => x.id === id))
+      .map((id) => ({ id, label: id, emoji: "🏅" }));
+    return [...conhecidos, ...orfaos];
+  }
+
   function desenharFiltro() {
     const presentes = (campo) => [...new Set((posts || []).map((p) => p[campo]).filter(Boolean))];
     const total = store.filterPosts(posts || [], filtros).length;
@@ -209,13 +222,11 @@ export function platesView({ cid }) {
         { value: "comprado", label: "🛒 Comprado" },
       ])}
 
-      ${secaoFiltro("Refeição", "meal", MEALS
-        .filter((m) => presentes("mealType").includes(m.id))
-        .map((m) => ({ value: m.id, label: `${m.emoji} ${m.label}` })))}
+      ${secaoFiltro("Refeição", "meal", listaComOrfaos("mealType", mealsOf(challenge), presentes)
+        .map((m) => ({ value: m.id, label: `${m.emoji || "🍽️"} ${esc(m.label)}` })))}
 
-      ${secaoFiltro("Cozinha", "cuisine", CUISINES
-        .filter((c) => presentes("cuisine").includes(c.id))
-        .map((c) => ({ value: c.id, label: `${c.emoji} ${c.label}` })))}
+      ${secaoFiltro("Selo", "cuisine", listaComOrfaos("cuisine", cuisinesOf(challenge), presentes)
+        .map((c) => ({ value: c.id, label: `${stampIcon(c, 15)} ${esc(c.label)}` })))}
 
       ${secaoFiltro("Nota", "nota", [8, 9].map((n) => ({ value: String(n), label: `⭐ ${n} ou mais` })))}
 

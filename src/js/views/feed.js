@@ -2,7 +2,7 @@ import {
   h, esc, avatar, topbar, backBtn, tabbar, spinner, sheet, confirmSheet,
   dayLabel, timeLabel, relative, shortDate, dayKey, toast, toastError,
 } from "../ui.js";
-import { formatPoints } from "../food.js";
+import { formatPoints, pointsLabel, rulesOf, mealsOf, eventsOf, platePoints } from "../food.js";
 import { compress } from "../image.js";
 import { PHOTO } from "../config.js";
 import { icon } from "../icons.js";
@@ -287,6 +287,9 @@ export function detailsView({ cid }) {
         ${isOwner ? `
         <button class="list-row" data-nav="/c/${cid}/editar">
           <span class="ico">${icon("pencil", 22)}</span><span class="label">Editar desafio</span><span class="chev">${icon("chevron", 18)}</span>
+        </button>
+        <button class="list-row" data-nav="/c/${cid}/regras">
+          <span class="ico">${icon("target", 22)}</span><span class="label">Pontos, refeições e selos</span><span class="chev">${icon("chevron", 18)}</span>
         </button>` : ""}
         <button class="list-row danger" data-leave>
           <span class="ico">${icon("exit", 22)}</span><span class="label">Deixar</span>
@@ -298,16 +301,34 @@ export function detailsView({ cid }) {
         .then((u) => u && navigate(`/c/${cid}/u/${u}`));
     });
 
+    // As regras são lidas do desafio, não escritas à mão aqui: com peso por
+    // refeição e prêmio por cravar, um texto fixo viraria mentira no dia em
+    // que o dono mexesse em qualquer valor.
     body.querySelector("[data-rules]").addEventListener("click", () => {
-      sheet("Como funciona", [{
-        label: (challenge.description ? challenge.description + "\n\n" : "")
-          + "Todo dia, cada um posta a foto de um prato.\n"
-          + "Comprou vale 1 ponto; cozinhou vale 2 pontos.\n"
-          + "A partir de 7 dias seguidos, ambos valem 1,5 ponto.\n"
-          + "Cada um tem 2 vale-faltas pra salvar a sequência.\n"
-          + "A galera dá nota de 1 a 10 nos pratos.",
-        value: null,
-      }]);
+      const r = rulesOf(challenge);
+      const pesos = mealsOf(challenge)
+        .filter((m) => Number(m.weight ?? 1) !== 1)
+        .map((m) => `${m.emoji || "🍽️"} ${m.label}: ${pointsLabel(platePoints({ mealType: m.id }, challenge))} / ${pointsLabel(platePoints({ homemade: true, mealType: m.id }, challenge))}`);
+      const eventos = eventsOf(challenge)
+        .map((ev) => `${ev.emoji || "🎯"} ${ev.name}: ${ev.need} selos = +${pointsLabel(ev.bonus)}`);
+
+      const linhas = [
+        challenge.description || "",
+        "Todo dia, cada um posta a foto de um prato.",
+        `Comprou vale ${pointsLabel(r.bought)}; cozinhou vale ${pointsLabel(r.homemade)}.`,
+        ...(pesos.length ? ["", "Refeições que valem diferente:", ...pesos] : []),
+        "",
+        `A partir de ${r.streakFrom} dias seguidos, tudo vale ${formatPoints(r.streakMultiplier)}x.`,
+        Number(r.repeatMeal) === 0
+          ? "Segunda vez da mesma refeição no mesmo dia não pontua."
+          : `Segunda vez da mesma refeição no mesmo dia vale ${pointsLabel(r.repeatMeal)}.`,
+        `Cravar o preço vale ${pointsLabel(r.guessPrice)}; cravar as calorias, ${pointsLabel(r.guessKcal)}.`,
+        "Cada um tem 2 vale-faltas pra salvar a sequência.",
+        "A galera dá nota de 1 a 10 nos pratos — e as notas são anônimas.",
+        ...(eventos.length ? ["", "Eventos:", ...eventos] : []),
+      ].filter((l) => l !== "" || true);
+
+      sheet("Como funciona", [{ label: linhas.join("\n").replace(/\n{3,}/g, "\n\n").trim(), value: null }]);
     });
 
     body.querySelector("[data-leave]").addEventListener("click", async () => {
@@ -377,6 +398,13 @@ export async function editChallengeView({ cid }) {
 
         <div class="gap"></div>
         <div class="card list-card">
+          <button class="list-row" data-nav="/c/${cid}/regras">
+            <span class="ico">${icon("target", 22)}</span>
+            <span class="label">Pontos, refeições e selos
+              <span class="pref-hint">quanto vale cada refeição, selos do passaporte e eventos</span>
+            </span>
+            <span class="chev">${icon("chevron", 18)}</span>
+          </button>
           <button class="list-row" data-nav="/c/${cid}/enviadas">
             <span class="ico">${icon("bell", 22)}</span>
             <span class="label">Notificações enviadas</span>

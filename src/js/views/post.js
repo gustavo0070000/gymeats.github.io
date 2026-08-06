@@ -11,8 +11,9 @@ import { pickPlace } from "./place-picker.js";
 import { plateLink } from "./plates.js";
 
 import {
-  MEALS, mealById, CUISINES, cuisineById,
-  formatPoints, formatMoney, formatRating, formatKcal, guessWinners, basePoints,
+  mealsOf, mealById, cuisinesOf, cuisineById, stampIcon, rulesOf, platePoints, mealWeight,
+  formatPoints, pointsLabel, formatMoney, formatRating, formatKcal, guessWinners,
+  storedPlatePoints, eventsOf, eventoAberto, cravou,
 } from "../food.js";
 
 const EMOJIS = ["🔥", "😍", "🤤", "👏", "😂", "🤮", "💀", "🐐"];
@@ -137,6 +138,15 @@ export function composeView({ cid }) {
     const previewUrl = capturedFile ? URL.createObjectURL(capturedFile) : "";
     const challenge = await store.getChallenge(cid);
     const user = store.me();
+    const regras = rulesOf(challenge);
+    const refeicoes = mealsOf(challenge);
+    const selos = cuisinesOf(challenge);
+    const hojeKey = dayKey(now);
+    const eventosAbertos = eventsOf(challenge).filter((ev) => eventoAberto(ev, hojeKey));
+
+    // Quais refeições a pessoa já postou hoje: o segundo prato da mesma
+    // refeição continua valendo pra galera chutar, mas não pontua de novo.
+    const jaHoje = await store.refeicoesDoDia(cid, store.uid(), hojeKey).catch(() => new Set());
 
     el.innerHTML = `
       <div class="screen">
@@ -196,9 +206,10 @@ export function composeView({ cid }) {
 
           <div class="card">
             <div class="toggle-row" data-homemade-row>
-              <button class="toggle-opt active" data-homemade="0">🛒 Comprei<span>1 ponto</span></button>
-              <button class="toggle-opt" data-homemade="1">👨‍🍳 Cozinhei<span>2 pontos</span></button>
+              <button class="toggle-opt active" data-homemade="0">🛒 Comprei<span data-pts-comprado>${pointsLabel(regras.bought)}</span></button>
+              <button class="toggle-opt" data-homemade="1">👨‍🍳 Cozinhei<span data-pts-casa>${pointsLabel(regras.homemade)}</span></button>
             </div>
+            <div class="hint-row" data-aviso-refeicao hidden></div>
           </div>
 
           <div class="card">
@@ -226,16 +237,31 @@ export function composeView({ cid }) {
           <div class="card">
             <div class="field-label" style="padding:14px 16px 0">Refeição</div>
             <div class="chip-wrap" data-meals>
-              ${MEALS.map((m) => `<button class="chip" data-meal="${m.id}">${m.emoji} ${m.label}</button>`).join("")}
+              ${refeicoes.map((m) => `
+                <button class="chip" data-meal="${esc(m.id)}">${m.emoji || "🍽️"} ${esc(m.label)}
+                  ${Number(m.weight) !== 1 && m.weight != null
+                    ? `<span class="chip-peso">×${formatPoints(m.weight)}</span>` : ""}
+                </button>`).join("")}
             </div>
           </div>
 
           <div class="card">
-            <div class="field-label" style="padding:14px 16px 0">Cozinha · carimba o passaporte</div>
+            <div class="field-label" style="padding:14px 16px 0">Selo · carimba o passaporte</div>
             <div class="chip-wrap scroll" data-cuisines>
-              ${CUISINES.map((c) => `<button class="chip" data-cuisine="${c.id}">${c.emoji} ${c.label}</button>`).join("")}
+              ${selos.map((c) => `<button class="chip" data-cuisine="${esc(c.id)}">${stampIcon(c, 18)} ${esc(c.label)}</button>`).join("")}
             </div>
           </div>
+
+          ${eventosAbertos.length ? `
+            <div class="card">
+              <div class="field-label" style="padding:14px 16px 0">Eventos rolando</div>
+              ${eventosAbertos.map((ev) => `
+                <div class="evento-linha">
+                  <span class="evento-nome">${ev.emoji || "🎯"} ${esc(ev.name)}</span>
+                  <span class="evento-premio">${ev.need} selos · +${pointsLabel(ev.bonus)}</span>
+                </div>`).join("")}
+              <div class="hint-row">Escolha um selo da lista do evento pra avançar nele.</div>
+            </div>` : ""}
 
           <div class="gap"></div>
         </div>
@@ -275,8 +301,41 @@ export function composeView({ cid }) {
           b.classList.toggle("active", b.dataset[attr] === get()));
       });
     };
-    chipGroup("[data-meals]", "meal", () => meal, (v) => (meal = v));
+    /* Quanto este prato vai valer, dito antes de publicar.
+       Sem isso, a pessoa marca "Cozinhei" num whey, vê "2 pontos" escrito no
+       botão e só descobre no placar que a refeição valia 0,5 — ou zero, por
+       ser a segunda igual do dia. */
+    const avisoEl = el.querySelector("[data-aviso-refeicao]");
+    const renderPontos = () => {
+      const diaEscolhido = campoDia.value || hojeKey;
+      const repetida = !!meal && diaEscolhido === hojeKey && jaHoje.has(meal);
+      const valor = platePoints({ homemade, mealType: meal, repetida }, challenge);
+      el.querySelector("[data-pts-comprado]").textContent =
+        pointsLabel(platePoints({ homemade: false, mealType: meal, repetida }, challenge));
+      el.querySelector("[data-pts-casa]").textContent =
+        pointsLabel(platePoints({ homemade: true, mealType: meal, repetida }, challenge));
+
+      const nome = refeicoes.find((m) => m.id === meal)?.label || "";
+      if (repetida) {
+        avisoEl.hidden = false;
+        avisoEl.innerHTML = `Você já postou <b>${esc(nome)}</b> hoje. Pode publicar do
+          mesmo jeito — a galera chuta preço e caloria —, mas este vale
+          ${esc(pointsLabel(valor))}.`;
+      } else if (meal && mealWeight(meal, challenge) !== 1) {
+        // Os dois valores, sempre: dizer só o do botão ativo faz a pessoa
+        // achar que o outro botão vale o de tabela.
+        avisoEl.hidden = false;
+        avisoEl.innerHTML = `<b>${esc(nome)}</b> vale diferente neste desafio: `
+          + `${esc(pointsLabel(platePoints({ homemade: false, mealType: meal }, challenge)))} comprado, `
+          + `${esc(pointsLabel(platePoints({ homemade: true, mealType: meal }, challenge)))} cozinhado.`;
+      } else {
+        avisoEl.hidden = true;
+      }
+    };
+
+    chipGroup("[data-meals]", "meal", () => meal, (v) => { meal = v; renderPontos(); });
     chipGroup("[data-cuisines]", "cuisine", () => cuisine, (v) => (cuisine = v));
+    campoDia.addEventListener("change", renderPontos);
 
     el.querySelector("[data-homemade-row]").addEventListener("click", (e) => {
       const btn = e.target.closest("[data-homemade]");
@@ -284,7 +343,10 @@ export function composeView({ cid }) {
       homemade = btn.dataset.homemade === "1";
       el.querySelectorAll("[data-homemade]").forEach((b) =>
         b.classList.toggle("active", (b.dataset.homemade === "1") === homemade));
+      renderPontos();
     });
+
+    renderPontos();
 
     let place = "";
     const placeLabel = el.querySelector("[data-place-label]");
@@ -521,6 +583,9 @@ export function postView({ cid, pid }) {
     const meu = palpites[myUid];
     const revelado = isMine || meu != null;
     const campeoes = new Set(guessWinners(palpites, post.kcal).map((g) => g.uid));
+    const r = rulesOf(challenge);
+    const cravaram = new Set(Object.entries(palpites)
+      .filter(([, v]) => cravou(v, post.kcal, r.tolKcal)).map(([u]) => u));
 
     if (!revelado) {
       return `
@@ -530,7 +595,9 @@ export function postView({ cid, pid }) {
             <input data-kcal-guess type="number" inputmode="numeric" min="1" step="10" placeholder="kcal">
             <button class="btn btn-primary" data-kcal-send style="width:auto;padding:12px 22px">Chutar</button>
           </div>
-          <div class="hint-row">O valor real só aparece depois do seu chute.</div>
+          <div class="hint-row">O valor real só aparece depois do seu chute.
+            ${r.guessKcal > 0 ? `Cravar vale <b>${esc(pointsLabel(r.guessKcal))}</b>${
+              r.tolKcal > 0 ? ` (até ${r.tolKcal} kcal de margem)` : ""}.` : ""}</div>
         </div>`;
     }
 
@@ -566,12 +633,14 @@ export function postView({ cid, pid }) {
             <div class="guess-item ${campeoes.has(u) ? "win" : ""}">
               <span class="who">${u === myUid ? "Você" : esc(nameOf(u))}</span>
               <span class="val">${formatKcal(v)}</span>
-              <span class="off">${campeoes.has(u)
-                ? "🏆"
-                : `${v > post.kcal ? "+" : "−"}${Math.abs(v - post.kcal).toLocaleString("pt-BR")}`}</span>
+              <span class="off">${cravaram.has(u)
+                ? `🎯 +${formatPoints(r.guessKcal)}`
+                : campeoes.has(u)
+                  ? "🏆"
+                  : `${v > post.kcal ? "+" : "−"}${Math.abs(v - post.kcal).toLocaleString("pt-BR")}`}</span>
             </div>`).join("")}
         </div>
-        ${campeoes.size > 1 ? `<div class="hint-row">Empate: ${campeoes.size} palpites na mesma distância.</div>` : ""}`
+        ${campeoes.size > 1 && !cravaram.size ? `<div class="hint-row">Empate: ${campeoes.size} palpites na mesma distância.</div>` : ""}`
         : `<div class="hint-row">Ninguém chutou ainda.</div>`}
         ${isMine ? `<div class="pad" style="padding:8px 0 0">
           <button class="btn btn-white" data-corrigir-kcal>Corrigir o valor</button>
@@ -589,6 +658,9 @@ export function postView({ cid, pid }) {
     const myGuess = guesses[myUid];
     const revealed = isMine || myGuess != null;
     const campeoes = new Set(guessWinners(guesses, post.price).map((g) => g.uid));
+    const r = rulesOf(challenge);
+    const cravaram = new Set(Object.entries(guesses)
+      .filter(([, v]) => cravou(v, post.price, r.tolPrice)).map(([u]) => u));
 
     if (!revealed) {
       return `
@@ -598,7 +670,9 @@ export function postView({ cid, pid }) {
             <input data-guess type="number" inputmode="decimal" min="0" step="0.01" placeholder="R$ —">
             <button class="btn btn-primary" data-guess-send style="width:auto;padding:12px 22px">Chutar</button>
           </div>
-          <div class="hint-row">O preço real só aparece depois do seu chute.</div>
+          <div class="hint-row">O preço real só aparece depois do seu chute.
+            ${r.guessPrice > 0 ? `Cravar vale <b>${esc(pointsLabel(r.guessPrice))}</b>${
+              r.tolPrice > 0 ? ` (até ${formatMoney(r.tolPrice)} de margem)` : ""}.` : ""}</div>
         </div>`;
     }
 
@@ -613,12 +687,14 @@ export function postView({ cid, pid }) {
             <div class="guess-item ${campeoes.has(u) ? "win" : ""}">
               <span class="who">${u === myUid ? "Você" : esc(nameOf(u))}</span>
               <span class="val">${formatMoney(v)}</span>
-              <span class="off">${campeoes.has(u)
-                ? "🏆"
-                : `${v > post.price ? "+" : "−"}${formatMoney(Math.abs(v - post.price)).replace("R$", "").trim()}`}</span>
+              <span class="off">${cravaram.has(u)
+                ? `🎯 +${formatPoints(r.guessPrice)}`
+                : campeoes.has(u)
+                  ? "🏆"
+                  : `${v > post.price ? "+" : "−"}${formatMoney(Math.abs(v - post.price)).replace("R$", "").trim()}`}</span>
             </div>`).join("")}
         </div>
-        ${campeoes.size > 1 ? `<div class="hint-row">Empate: ${campeoes.size} palpites na mesma distância.</div>` : ""}`
+        ${campeoes.size > 1 && !cravaram.size ? `<div class="hint-row">Empate: ${campeoes.size} palpites na mesma distância.</div>` : ""}`
         : `<div class="hint-row">Ninguém chutou ainda.</div>`}
       </div>`;
   };
@@ -626,9 +702,11 @@ export function postView({ cid, pid }) {
   const draw = () => {
     if (!post) return;
     const isMine = post.uid === store.uid();
-    const meal = mealById(post.mealType);
-    const cuisine = cuisineById(post.cuisine);
+    const meal = mealById(post.mealType, challenge);
+    const cuisine = cuisineById(post.cuisine, challenge);
     const reactions = post.reactions || {};
+    // O que este prato valeu de verdade — não o que a regra de hoje diria.
+    const valeu = storedPlatePoints(post, challenge, !!post.mealRepetida);
 
     body.innerHTML = `
       <div style="background:#000">
@@ -653,11 +731,12 @@ export function postView({ cid, pid }) {
         <button class="meta-chip" data-nav="${plateLink(cid, {
           periodo: "all", feito: post.homemade ? "casa" : "comprado" })}">
           ${post.homemade ? "👨‍🍳 Cozinhou" : "🛒 Comprou"}
-          <b class="pts">+${formatPoints(basePoints(post.homemade))}</b></button>
+          <b class="pts">${valeu > 0 ? `+${formatPoints(valeu)}` : "0"}</b></button>
         ${cuisine ? `<button class="meta-chip" data-nav="${plateLink(cid, {
-          periodo: "all", cuisine: post.cuisine })}">${cuisine.emoji} ${cuisine.label}</button>` : ""}
+          periodo: "all", cuisine: post.cuisine })}">${stampIcon(cuisine, 16)} ${esc(cuisine.label)}</button>` : ""}
         ${meal ? `<button class="meta-chip" data-nav="${plateLink(cid, {
-          periodo: "all", meal: post.mealType })}">${meal.emoji} ${meal.label}</button>` : ""}
+          periodo: "all", meal: post.mealType })}">${meal.emoji || "🍽️"} ${esc(meal.label)}
+          ${post.mealRepetida ? '<i class="repetida">repetida</i>' : ""}</button>` : ""}
         ${post.place || post.coords
           ? (post.placeKey
             ? `<button class="meta-chip" data-nav="${plateLink(cid, { periodo: "all", lugar: post.placeKey })}">
@@ -690,13 +769,19 @@ export function postView({ cid, pid }) {
         .catch((err) => toastError(err?.message || "Não deu pra dar nota."));
     });
 
+    // Cravar rende ponto: chegar perto não. É a única forma de ganhar
+    // ponto no prato de outra pessoa, então merece um aviso à altura.
+    const avisarPalpite = (ganhou) => {
+      if (ganhou > 0) toast(`Cravou! +${pointsLabel(ganhou)} pra você 🎯`);
+    };
+
     body.querySelector("[data-guess-send]")?.addEventListener("click", async (e) => {
       const input = body.querySelector("[data-guess]");
       const value = parseFloat(input.value);
       if (!isFinite(value) || value < 0) return toastError("Bota um valor.");
       e.currentTarget.disabled = true;
       try {
-        await store.guessPrice(cid, pid, value);
+        avisarPalpite(await store.guessPrice(cid, pid, value));
       } catch (err) {
         e.currentTarget.disabled = false;
         toastError(err?.message || "Não deu pra chutar.");
@@ -709,7 +794,7 @@ export function postView({ cid, pid }) {
       if (!isFinite(value) || value <= 0) return toastError("Bota um número.");
       e.currentTarget.disabled = true;
       try {
-        await store.guessKcal(cid, pid, value);
+        avisarPalpite(await store.guessKcal(cid, pid, value));
       } catch (err) {
         e.currentTarget.disabled = false;
         toastError(err?.message || "Não deu pra chutar.");
@@ -836,7 +921,9 @@ export function postView({ cid, pid }) {
   });
   const b = store.watchComments(cid, pid, (c) => { comments = c; drawComments(); });
   const c = store.watchMembers(cid, (list) => { members = list; if (post) draw(); });
-  const d = store.watchChallenge(cid, (ch) => { challenge = ch; });
+  // Redesenha: as regras do desafio decidem quanto o prato valeu, quanto
+  // rende cravar e como o selo é desenhado.
+  const d = store.watchChallenge(cid, (ch) => { challenge = ch; if (post) draw(); });
 
   return { el, destroy: () => { a(); b(); c(); d(); } };
 }
@@ -861,6 +948,11 @@ export async function editPostView({ cid, pid }) {
   const p2 = (n) => String(n).padStart(2, "0");
   const dayValue = `${when.getFullYear()}-${p2(when.getMonth() + 1)}-${p2(when.getDate())}`;
   const timeValue = `${p2(when.getHours())}:${p2(when.getMinutes())}`;
+
+  const challenge = await store.getChallenge(cid).catch(() => null);
+  const regras = rulesOf(challenge);
+  const refeicoes = mealsOf(challenge);
+  const selos = cuisinesOf(challenge);
 
   const el = h(`
     <div class="screen">
@@ -904,9 +996,10 @@ export async function editPostView({ cid, pid }) {
 
         <div class="card">
           <div class="toggle-row" data-homemade-row>
-            <button class="toggle-opt ${post.homemade ? "" : "active"}" data-homemade="0">🛒 Comprei<span>1 ponto</span></button>
-            <button class="toggle-opt ${post.homemade ? "active" : ""}" data-homemade="1">👨‍🍳 Cozinhei<span>2 pontos</span></button>
+            <button class="toggle-opt ${post.homemade ? "" : "active"}" data-homemade="0">🛒 Comprei<span>${pointsLabel(regras.bought)}</span></button>
+            <button class="toggle-opt ${post.homemade ? "active" : ""}" data-homemade="1">👨‍🍳 Cozinhei<span>${pointsLabel(regras.homemade)}</span></button>
           </div>
+          <div class="hint-row">Salvar recalcula o placar com as regras atuais do desafio.</div>
         </div>
 
         <div class="card">
@@ -933,14 +1026,19 @@ export async function editPostView({ cid, pid }) {
         <div class="card">
           <div class="field-label" style="padding:14px 16px 0">Refeição</div>
           <div class="chip-wrap" data-meals>
-            ${MEALS.map((m) => `<button class="chip ${m.id === post.mealType ? "active" : ""}" data-meal="${m.id}">${m.emoji} ${m.label}</button>`).join("")}
+            ${refeicoes.map((m) => `
+              <button class="chip ${m.id === post.mealType ? "active" : ""}" data-meal="${esc(m.id)}">
+                ${m.emoji || "🍽️"} ${esc(m.label)}
+                ${Number(m.weight) !== 1 && m.weight != null
+                  ? `<span class="chip-peso">×${formatPoints(m.weight)}</span>` : ""}
+              </button>`).join("")}
           </div>
         </div>
 
         <div class="card">
-          <div class="field-label" style="padding:14px 16px 0">Cozinha</div>
+          <div class="field-label" style="padding:14px 16px 0">Selo</div>
           <div class="chip-wrap scroll" data-cuisines>
-            ${CUISINES.map((c) => `<button class="chip ${c.id === post.cuisine ? "active" : ""}" data-cuisine="${c.id}">${c.emoji} ${c.label}</button>`).join("")}
+            ${selos.map((c) => `<button class="chip ${c.id === post.cuisine ? "active" : ""}" data-cuisine="${esc(c.id)}">${stampIcon(c, 18)} ${esc(c.label)}</button>`).join("")}
           </div>
         </div>
 

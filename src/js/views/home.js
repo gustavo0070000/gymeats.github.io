@@ -5,6 +5,7 @@ import * as store from "../store.js";
 import { navigate } from "../router.js";
 import { compress } from "../image.js";
 import { PHOTO, APP_NAME, APP_VERSION } from "../config.js";
+import { abrirNovidades } from "../changelog.js";
 
 const LAST_KEY = "gymeats:last-challenge";
 export const lastChallenge = () => localStorage.getItem(LAST_KEY);
@@ -395,8 +396,15 @@ export function accountView() {
           <span class="label">Notificações</span>
           <span class="chev">${icon("chevron", 18)}</span>
         </button>
-        <button class="list-row" data-admin hidden>
+        <button class="list-row" data-novidades>
           <span class="ico">${icon("bolt", 22)}</span>
+          <span class="label">O que mudou
+            <span class="pref-hint">notas das versões do app</span>
+          </span>
+          <span class="chev">${icon("chevron", 18)}</span>
+        </button>
+        <button class="list-row" data-admin hidden>
+          <span class="ico">${icon("target", 22)}</span>
           <span class="label">Painel</span>
           <span class="chev">${icon("chevron", 18)}</span>
         </button>
@@ -434,6 +442,8 @@ export function accountView() {
       linha.hidden = !sim;
       if (sim) linha.addEventListener("click", () => navigate("/admin"));
     });
+
+    body.querySelector("[data-novidades]").addEventListener("click", () => abrirNovidades());
 
     body.querySelector("[data-copiar-id]").addEventListener("click", async () => {
       const id = store.uid() || "";

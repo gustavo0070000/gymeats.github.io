@@ -18,6 +18,8 @@ import { notificationsView } from "./views/notifications.js";
 import { sentView } from "./views/sent.js";
 import { platesView } from "./views/plates.js";
 import { adminView } from "./views/admin.js";
+import { challengeRulesView } from "./views/rules.js";
+import { mostrarNovidades } from "./changelog.js";
 
 const appEl = document.getElementById("app");
 
@@ -53,6 +55,7 @@ route("/c/:cid/bate-papo", guard(chatView));
 route("/c/:cid/novo", guard(composeView));
 route("/c/:cid/convite", guard(inviteView));
 route("/c/:cid/editar", guard(editChallengeView));
+route("/c/:cid/regras", guard(challengeRulesView));
 route("/c/:cid/guia", guard(guideView));
 route("/c/:cid/recap", guard(recapView));
 route("/c/:cid/pratos", guard(platesView));
@@ -93,12 +96,14 @@ async function boot() {
     if (!authReady) {
       authReady = true;
       startRouter(appEl);
+      // Só depois de logado: a tela de login não é lugar de notas da versão.
+      if (u) mostrarNovidades();
       return;
     }
 
     // logou ou deslogou depois do boot
     if (!!u !== wasLogged) {
-      if (u) navigate("/", { replace: true });
+      if (u) { navigate("/", { replace: true }); mostrarNovidades(); }
       else { location.hash = "#/"; render(); }
     }
   });

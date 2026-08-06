@@ -1996,3 +1996,199 @@ button.stat:active { opacity: .6; }
   word-break: break-all;
   margin-top: 2px;
 }
+
+/* ============================================================
+   Regras configuráveis: pesos, selos e eventos
+   ============================================================ */
+
+/* Peso da refeição no chip de escolher. Só aparece quando é diferente de 1 —
+   marcar "×1" em tudo seria ruído em cima da opção mais usada. */
+.chip-peso {
+  font-size: 11.5px;
+  font-weight: 800;
+  opacity: .7;
+  margin-left: 2px;
+}
+.chip.active .chip-peso { opacity: .9; }
+
+/* Selo com imagem própria em vez de emoji. */
+.selo-img {
+  display: inline-block;
+  vertical-align: -.18em;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+/* "repetida" no chip da refeição: o prato existe, mas não somou de novo. */
+.meta-chip .repetida {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  color: var(--text-2);
+  margin-left: 4px;
+}
+
+/* Selo que saiu da configuração mas continua no passaporte de quem ganhou. */
+.stamp.aposentado .lbl { font-style: italic; }
+
+.evento-linha {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+.evento-linha:last-of-type { border-bottom: none; }
+.evento-nome { flex: 1; min-width: 0; font-weight: 700; font-size: 16px; }
+.evento-premio { color: var(--text-2); font-weight: 700; font-size: 13.5px; white-space: nowrap; }
+
+.bd-bar .extra { background: var(--green); }
+
+/* ---------- Editor de refeições, selos e eventos ---------- */
+
+.cfg-item { padding: 10px 14px 12px; }
+.cfg-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.cfg-rotulo {
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cfg-item input {
+  border: 1.5px solid var(--track);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 16px;
+  font-weight: 700;
+  background: transparent;
+  outline: none;
+  min-width: 0;
+}
+.cfg-item input:focus { border-color: var(--red); }
+.cfg-emoji { width: 56px; flex: 0 0 56px; text-align: center; }
+.cfg-nome { flex: 1; min-width: 0; }
+.cfg-peso { width: 74px; flex: 0 0 74px; text-align: center; }
+.cfg-data { flex: 1; min-width: 0; font-size: 14.5px !important; }
+.cfg-valor {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cfg-x {
+  flex: 0 0 auto;
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--text-3);
+}
+.cfg-x:active { background: var(--red-soft); color: var(--red); }
+
+.cfg-selos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 4px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.cfg-selos .chip { font-size: 13.5px; padding: 7px 11px; }
+
+/* Grade de selos: nome e emoji lado a lado, uma linha por selo. */
+.selo-grade { padding: 6px 0; }
+.selo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+.selo-item:last-child { border-bottom: none; }
+.selo-foto {
+  flex: 0 0 40px;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  font-size: 22px;
+}
+.selo-item input {
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 15.5px;
+  font-weight: 700;
+  background: var(--fill);
+  outline: none;
+  min-width: 0;
+}
+.selo-item input:focus { border-color: var(--red); background: transparent; }
+.selo-nome { flex: 1; min-width: 0; }
+.selo-emoji { width: 62px; flex: 0 0 62px; text-align: center; }
+
+/* ============================================================
+   Notas da versão
+
+   O app se atualiza sozinho e recarrega; sem isto, uma mudança em
+   regra de ponto chegava sem aviso e virava discussão no grupo.
+   ============================================================ */
+
+.notas-backdrop { align-items: center; padding: 20px; }
+.notas {
+  width: 100%;
+  max-width: 440px;
+  margin: auto;
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: min(78vh, 640px);
+  /* Sobe pouco: o card é centralizado, e o slide-up das folhas (100% da
+     altura) faria ele atravessar a tela inteira. */
+  animation: notas-entra .22s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes notas-entra { from { transform: translateY(16px); opacity: 0 } }
+.notas-topo { padding: 20px 20px 12px; }
+.notas-tag {
+  display: inline-block;
+  background: var(--red-soft);
+  color: var(--red-ink);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+.notas-titulo {
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -.5px;
+  margin-top: 8px;
+}
+.notas-sub { color: var(--text-2); font-weight: 700; font-size: 15px; margin-top: 2px; }
+.notas-corpo { overflow-y: auto; padding: 0 20px; }
+.notas-versao {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-top: 12px;
+}
+.notas-lista { margin: 8px 0 4px; padding-left: 20px; }
+.notas-lista li {
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  margin-bottom: 11px;
+}
+.notas-pe { padding: 12px 20px calc(16px + var(--safe-bottom)); }

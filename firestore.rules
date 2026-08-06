@@ -97,6 +97,17 @@ service cloud.firestore {
                    || ((me in before) && after == before.removeAll([me])));
       }
 
+      // O documento do desafio guarda a CONFIGURAÇÃO DA PONTUAÇÃO:
+      //   rules     — quanto vale comprado/cozinhado, bônus de sequência,
+      //               refeição repetida e o prêmio por cravar
+      //   meals     — refeições e o peso de cada uma
+      //   cuisines  — os selos do passaporte
+      //   events    — missões que dão bônus por juntar selos
+      // Por isso `update` é do dono e mais ninguém: a única exceção é
+      // `onlyToggledOwnMembership`, que confere campo a campo e recusa
+      // qualquer coisa além de entrar ou sair da lista de membros. Sem essa
+      // checagem, entrar num desafio seria a brecha pra reescrever o próprio
+      // placar. (Coberto em scratchpad/config-test.mjs.)
       allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
       allow create: if signedIn()
                     && request.resource.data.ownerUid == request.auth.uid
@@ -111,6 +122,13 @@ service cloud.firestore {
         // porque é ele quem recalcula o placar ao apagar um post alheio
         // Admin entra aqui porque consertar a data de um prato obriga a
         // refazer a ficha de quem postou — senão o placar fica com o dia velho.
+        //
+        // "Mexer na própria ficha" inclui creditar o ponto de ter cravado o
+        // preço ou a caloria de um prato alheio (`extraPoints`). Isso é
+        // confiança, não trava: quem quiser pode escrever qualquer número
+        // aqui. É um app entre amigos e blindar isso exigiria mandar cada
+        // palpite por Cloud Function — caro em complexidade e em cota, pra
+        // um problema que ninguém tem.
         allow create, update: if isSelf(uid) || isOwner(cid) || isAdmin();
         allow delete: if isSelf(uid) || isOwner(cid) || isAdmin();
       }

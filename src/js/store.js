@@ -2,12 +2,13 @@ import {
   db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch, runTransaction, deleteField,
-  callable,
+  getCountFromServer, callable,
 } from "./firebase.js";
 import { dayKey, toDate } from "./ui.js";
 import {
-  pointsFor, basePoints, ratingAverage, resolvePlaceKey, MIN_RATINGS,
-  POINTS_BOUGHT, POINTS_HOMEMADE,
+  ratingAverage, resolvePlaceKey, MIN_RATINGS,
+  rulesOf, eventsOf, platePoints, applyStreak, storedPlatePoints,
+  eventProgress, cravou, MOTOR_ATUAL,
 } from "./food.js";
 
 /* ============================================================
@@ -254,6 +255,73 @@ export async function loadPhoto(photoId) {
 
 /* ---------- Posts ---------- */
 
+/**
+ * Já tem prato dessa refeição no mesmo dia?
+ *
+ * É a trava contra "whey com leite conta como prato cozinhado". O segundo
+ * café da manhã do dia continua podendo ser publicado — a galera chuta
+ * preço e caloria nele —, só não soma ponto de novo.
+ *
+ * A consulta é por igualdade em dois campos, que o Firestore resolve sem
+ * índice composto. Prato sem refeição marcada nunca é considerado repetido:
+ * penalizá-lo puniria justamente os pratos antigos, de antes do campo virar
+ * parte da pontuação.
+ */
+export async function refeicoesDoDia(cid, memberUid, dia) {
+  if (!memberUid || !dia) return new Set();
+  const q = query(
+    collection(db, "challenges", cid, "posts"),
+    where("uid", "==", memberUid),
+    where("dayKey", "==", dia),
+  );
+  const snap = await getDocs(q);
+  return new Set(snap.docs.map((d) => d.data().mealType).filter(Boolean));
+}
+
+async function refeicaoRepetida(cid, memberUid, dia, mealType) {
+  if (!mealType) return false;
+  try {
+    return (await refeicoesDoDia(cid, memberUid, dia)).has(mealType);
+  } catch {
+    // Sem conseguir conferir, não cobra: errar pra menos é pior que errar
+    // pra mais, e o recálculo do placar corrige de qualquer jeito.
+    return false;
+  }
+}
+
+/**
+ * Progresso dos eventos guardado na ficha, atualizado a cada prato.
+ * Fica na ficha em vez de ser recalculado porque recalcular exigiria ler
+ * todos os pratos da pessoa dentro da transação de publicar.
+ */
+function avancarEventos(member, challenge, { cuisine, dia }) {
+  const antes = member?.eventos || {};
+  const eventos = {};
+  let bonusNovo = 0;
+
+  for (const ev of eventsOf(challenge)) {
+    const atual = antes[ev.id] || { cozinhas: [], bonus: 0 };
+    const cozinhas = new Set(atual.cozinhas || []);
+    const cabe = cuisine
+      && (ev.cuisineIds || []).includes(cuisine)
+      && (!ev.from || dia >= ev.from)
+      && (!ev.to || dia <= ev.to);
+    if (cabe) cozinhas.add(cuisine);
+
+    const need = Math.max(1, Number(ev.need) || 1);
+    const jaGanhou = Number(atual.bonus) > 0;
+    const ganhaAgora = !jaGanhou && cozinhas.size >= need;
+    if (ganhaAgora) bonusNovo += Number(ev.bonus) || 0;
+
+    eventos[ev.id] = {
+      cozinhas: [...cozinhas],
+      bonus: jaGanhou ? Number(atual.bonus) : (ganhaAgora ? Number(ev.bonus) || 0 : 0),
+      dia: jaGanhou ? atual.dia : (ganhaAgora ? dia : atual.dia || ""),
+    };
+  }
+  return { eventos, bonusNovo };
+}
+
 export async function createPost(cid, {
   title, description, mealType, cuisine, homemade, place, coords, price,
   photo, thumb, micro, at, dateEditada = false,
@@ -266,6 +334,12 @@ export async function createPost(cid, {
   // localização sumia do guia e do mapa.
   const pKey = resolvePlaceKey(place, coords);
 
+  // As regras do desafio e a checagem de refeição repetida saem da transação
+  // de propósito: transação do cliente só aceita leitura de documento único.
+  const challenge = await getChallenge(cid).catch(() => null);
+  const repetida = await refeicaoRepetida(cid, u.uid, key, mealType);
+  const base = platePoints({ homemade, mealType, repetida }, challenge);
+
   const photoId = photo ? await savePhoto(photo, cid) : null;
 
   const postRef = doc(collection(db, "challenges", cid, "posts"));
@@ -277,9 +351,11 @@ export async function createPost(cid, {
 
     // O bônus de sequência olha a sequência já contando o dia deste post.
     const days = new Set([...(member.days || []), ...(member.jokerDays || []), key]);
-    const points = pointsFor(homemade, streakFrom(days, when));
+    const points = applyStreak(base, streakFrom(days, when), challenge);
+    const { eventos, bonusNovo } = avancarEventos(member, challenge, { cuisine, dia: key });
+
     const dayPoints = { ...(member.dayPoints || {}) };
-    const nextDayTotal = Number(dayPoints[key] || 0) + points;
+    const nextDayTotal = Number(dayPoints[key] || 0) + points + bonusNovo;
 
     tx.set(postRef, {
       uid: u.uid,
@@ -309,16 +385,21 @@ export async function createPost(cid, {
       ratings: {},
       ratingAvg: null,
       ratingCount: 0,
-      basePoints: basePoints(homemade),
+      basePoints: base,
+      // Diz por qual motor este prato é pontuado. Sem a marca, o prato é
+      // anterior à pontuação configurável e mantém o valor que já ganhou.
+      pointsRules: MOTOR_ATUAL,
+      mealRepetida: repetida,
     });
 
     const patch = {
       name: u.name, photo: u.photo,
       days: arrayUnion(key),
       total: increment(1),
-      totalPoints: increment(points),
+      totalPoints: increment(points + bonusNovo),
       lastPostAt: when,
       [homemade ? "homemadeCount" : "boughtCount"]: increment(1),
+      eventos,
     };
     patch.dayPoints = { ...dayPoints, [key]: nextDayTotal };
     if (cuisine) patch.cuisines = arrayUnion(cuisine);
@@ -387,6 +468,7 @@ export async function updatePost(cid, post, {
 }) {
   const when = at ? toDate(at) : postTime(post);
   const pKey = resolvePlaceKey(place, coords);
+  const challenge = await getChallenge(cid).catch(() => null);
 
   await updateDoc(doc(db, "challenges", cid, "posts", post.id), {
     title: title ?? post.title,
@@ -402,7 +484,10 @@ export async function updatePost(cid, post, {
     dayKey: dayKey(when),
     // Data mexida à mão passa a valer sobre a do servidor.
     dateEditada: true,
-    basePoints: basePoints(homemade),
+    // Editar é reescolher tudo, então o prato passa a valer pela regra atual.
+    // O `recountMember` logo abaixo é quem decide se ele é repetido no dia.
+    basePoints: platePoints({ homemade, mealType: mealType ?? post.mealType }, challenge),
+    pointsRules: MOTOR_ATUAL,
     editedAt: serverTimestamp(),
   });
 
@@ -430,32 +515,87 @@ export async function deletePost(cid, post) {
   await recountMember(cid, post.uid);
 }
 
-/** Recalcula dias, pontos e passaporte do membro a partir dos posts que sobraram. */
-async function recountMember(cid, memberUid) {
+/**
+ * Refaz a conta dos pontos de um membro a partir dos pratos dele.
+ *
+ * Esta é a única definição de "quanto vale o placar". A publicação faz a
+ * mesma conta de forma incremental; quando as duas divergem, esta ganha.
+ *
+ * Três coisas entram no `dayPoints` e por isso o total é sempre a soma dele:
+ *   1. os pratos da pessoa (com peso de refeição, repetida e sequência);
+ *   2. o bônus dos eventos concluídos, no dia em que fecharam;
+ *   3. os palpites cravados em pratos ALHEIOS, que ficam em `extraPoints`.
+ *
+ * O item 3 é guardado à parte porque não dá pra recalculá-lo aqui: viria
+ * dos pratos dos outros, e ler o desafio inteiro toda vez que alguém apaga
+ * um prato custaria megabytes (cada prato carrega a miniatura embutida).
+ */
+export function contarPratos(posts, { jokerDays = [], challenge = null } = {}) {
+  const porDia = new Map();
+  for (const p of posts) {
+    const dia = postDay(p);
+    if (!dia) continue;
+    if (!porDia.has(dia)) porDia.set(dia, []);
+    porDia.get(dia).push(p);
+  }
+
+  const days = [...porDia.keys()].sort();
+  const daySet = new Set([...days, ...jokerDays]);
+  const dayPoints = {};
+
+  for (const dia of days) {
+    // Dentro do dia, quem chegou primeiro leva o ponto cheio da refeição.
+    const doDia = porDia.get(dia).sort((a, b) => postTime(a) - postTime(b));
+    const jaViu = new Set();
+    for (const p of doDia) {
+      const repetida = !!p.mealType && jaViu.has(p.mealType);
+      if (p.mealType) jaViu.add(p.mealType);
+      const base = storedPlatePoints(p, challenge, repetida);
+      dayPoints[dia] = (dayPoints[dia] || 0)
+        + applyStreak(base, streakFrom(daySet, diaDoPost(p)), challenge);
+    }
+  }
+  return { days, dayPoints };
+}
+
+async function recountMember(cid, memberUid, challengeCache = null) {
+  const challenge = challengeCache || await getChallenge(cid).catch(() => null);
   const memberSnap = await getDoc(doc(db, "challenges", cid, "members", memberUid));
   const memberData = memberSnap.exists() ? memberSnap.data() : {};
   const jokerDays = memberData.jokerDays || [];
 
   const q = query(collection(db, "challenges", cid, "posts"), where("uid", "==", memberUid));
   const snap = await getDocs(q);
-  const posts = snap.docs.map((d) => d.data()).sort(byNewest).reverse();
+  const posts = snap.docs.map((d) => d.data());
 
-  const days = [...new Set(posts.map(postDay).filter(Boolean))].sort();
   const cuisines = [...new Set(posts.map((p) => p.cuisine).filter(Boolean))];
   const homemadeCount = posts.filter((p) => p.homemade).length;
 
-  // Refaz a pontuação post a post, respeitando o bônus de sequência.
-  const daySet = new Set([...days, ...jokerDays]);
-  const dayPoints = {};
-  let totalPoints = 0;
-  for (const post of posts) {
-    const day = postDay(post);
-    if (!day) continue;
-    const when = postTime(post);
-    const points = pointsFor(!!post.homemade, streakFrom(daySet, when));
-    dayPoints[day] = (dayPoints[day] || 0) + points;
-    totalPoints += points;
+  const { days, dayPoints } = contarPratos(posts, { jokerDays, challenge });
+
+  // ---- eventos: refeitos do zero a partir dos pratos ----
+  const marcas = posts.map((p) => ({ cuisine: p.cuisine, dia: postDay(p) }));
+  const eventos = {};
+  // Evento apagado da configuração some da ficha. Sem isto o bônus dele
+  // continuaria na conta do detalhamento (que lê a ficha) e não no
+  // dayPoints (que é refeito aqui) — e o placar passaria a "não conferir".
+  Object.keys(memberData.eventos || {}).forEach((id) => { eventos[id] = deleteField(); });
+  for (const ev of eventsOf(challenge)) {
+    const r = eventProgress(ev, marcas);
+    const cozinhas = (ev.cuisineIds || []).filter((id) =>
+      marcas.some((m) => m.cuisine === id && (!ev.from || m.dia >= ev.from) && (!ev.to || m.dia <= ev.to)));
+    const bonus = r.ok ? Number(ev.bonus) || 0 : 0;
+    eventos[ev.id] = { cozinhas, bonus, dia: r.ok ? (r.dia || "") : "" };
+    if (bonus && r.dia) dayPoints[r.dia] = (dayPoints[r.dia] || 0) + bonus;
   }
+
+  // ---- palpites cravados: preservados, nunca recalculados ----
+  const extra = memberData.extraPoints || {};
+  Object.entries(extra).forEach(([dia, v]) => {
+    dayPoints[dia] = (dayPoints[dia] || 0) + (Number(v) || 0);
+  });
+
+  const totalPoints = Object.values(dayPoints).reduce((s, v) => s + v, 0);
 
   // `merge: true` funde mapas em vez de trocá-los: um dia que deixou de
   // existir (post apagado, data corrigida) continuava valendo pontos pra
@@ -467,7 +607,7 @@ async function recountMember(cid, memberUid) {
   });
 
   await setDoc(doc(db, "challenges", cid, "members", memberUid), {
-    days, dayPoints: patch, totalPoints, cuisines,
+    days, dayPoints: patch, totalPoints, cuisines, eventos,
     homemadeCount,
     boughtCount: posts.length - homemadeCount,
     total: posts.length,
@@ -560,9 +700,11 @@ export async function repairDates(cid, ids) {
  * (só o dono consegue, porque mexe na ficha dos outros membros).
  */
 export async function recalcStandings(cid) {
+  const challenge = await getChallenge(cid).catch(() => null);
   const snap = await getDocs(collection(db, "challenges", cid, "members"));
   const uids = snap.docs.map((d) => d.id);
-  for (const memberUid of uids) await recountMember(cid, memberUid);
+  // O desafio é lido uma vez só: são as regras de pontuação, iguais pra todos.
+  for (const memberUid of uids) await recountMember(cid, memberUid, challenge);
   return uids.length;
 }
 
@@ -678,37 +820,83 @@ function mensagemDeErro(err) {
   return err?.message || "Não consegui falar com o servidor.";
 }
 
-/** Palpite de calorias — mesma mecânica do chute de preço. */
+/* ---------- Prêmio por cravar ---------- */
+
+/**
+ * Ponto que não vem de um prato próprio.
+ *
+ * Vai pra `extraPoints` além de `dayPoints` porque o recálculo do placar
+ * refaz `dayPoints` a partir dos pratos da pessoa — e este ponto veio do
+ * prato de outra. Sem o registro à parte, o primeiro "Recalcular placar"
+ * apagaria em silêncio todo mundo que cravou alguma coisa.
+ *
+ * Cai no dia de HOJE, não no dia do prato: pontuar um dia em que a pessoa
+ * não postou criaria um dia fantasma na ficha dela.
+ */
+async function premiar(cid, quanto, motivo) {
+  const id = uid();
+  if (!id || !(quanto > 0)) return 0;
+  const hoje = dayKey();
+  await setDoc(doc(db, "challenges", cid, "members", id), {
+    dayPoints: { [hoje]: increment(quanto) },
+    extraPoints: { [hoje]: increment(quanto) },
+    totalPoints: increment(quanto),
+    ultimoPremio: { motivo, quanto, dia: hoje, at: serverTimestamp() },
+  }, { merge: true });
+  return quanto;
+}
+
+/**
+ * Palpite de calorias — mesma mecânica do chute de preço.
+ * Devolve quantos pontos o palpite rendeu (0 quando não cravou).
+ */
 export async function guessKcal(cid, pid, value) {
   const id = uid();
   const amount = Math.round(Number(value));
   if (!isFinite(amount) || amount <= 0) throw new Error("Valor inválido.");
 
   const postRef = doc(db, "challenges", cid, "posts", pid);
+  let real = null;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(postRef);
     if (!snap.exists()) return;
     const post = snap.data();
     if (post.uid === id) throw new Error("Você já sabe quantas são.");
     if ((post.kcalGuesses || {})[id] != null) throw new Error("Você já chutou.");
+    real = post.kcal ?? null;
     tx.update(postRef, { kcalGuesses: { ...(post.kcalGuesses || {}), [id]: amount } });
   });
+
+  const r = rulesOf(await getChallenge(cid).catch(() => null));
+  if (real != null && cravou(amount, real, r.tolKcal)) {
+    return premiar(cid, Number(r.guessKcal) || 0, "kcal").catch(() => 0);
+  }
+  return 0;
 }
 
+/** Devolve quantos pontos o palpite rendeu (0 quando não cravou). */
 export async function guessPrice(cid, pid, value) {
   const id = uid();
   const amount = Number(value);
   if (!isFinite(amount) || amount < 0) throw new Error("Valor inválido.");
 
   const postRef = doc(db, "challenges", cid, "posts", pid);
+  let real = null;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(postRef);
     if (!snap.exists()) return;
     const post = snap.data();
     if (post.uid === id) throw new Error("Você já sabe quanto custou.");
     if ((post.guesses || {})[id] != null) throw new Error("Você já chutou.");
+    real = post.price ?? null;
     tx.update(postRef, { guesses: { ...(post.guesses || {}), [id]: amount } });
   });
+
+  const r = rulesOf(await getChallenge(cid).catch(() => null));
+  if (real != null && cravou(amount, real, r.tolPrice)) {
+    return premiar(cid, Number(r.guessPrice) || 0, "preco").catch(() => 0);
+  }
+  return 0;
 }
 
 /* ---------- Vale-faltas (coringas) ---------- */
@@ -874,6 +1062,7 @@ export function previousRange(period, challenge) {
 export function pointsBreakdown(member, posts, period, challenge) {
   const { start, end } = periodRange(period, challenge);
   const from = dayKey(start), to = dayKey(end);
+  const noPeriodo = (d) => period === "all" || (d >= from && d <= to);
   // `posts` já vem do período (periodPosts filtra por dayKey no servidor).
   // Refiltrar aqui por postDay parecia inofensivo e não é: quando os dois
   // divergem — post com data corrigida — o prato sumia da conta sem aviso.
@@ -884,25 +1073,63 @@ export function pointsBreakdown(member, posts, period, challenge) {
   // `postTime` fazia a conta errar sempre que os dois divergiam (post com data
   // corrigida), e o erro aparecia como bônus fantasma.
   const daySet = new Set([...(member.days || []), ...(member.jokerDays || [])]);
-  let base = 0, bonus = 0;
+
+  // O 2º prato da mesma refeição no mesmo dia vale o que a regra disser
+  // (0 por padrão). Reproduz aqui a mesma ordem do recountMember.
+  const porDia = new Map();
   for (const p of meus) {
-    const b = basePoints(!!p.homemade);
-    base += b;
-    bonus += pointsFor(!!p.homemade, streakFrom(daySet, diaDoPost(p))) - b;
+    const dia = postDay(p);
+    if (!dia) continue;
+    if (!porDia.has(dia)) porDia.set(dia, []);
+    porDia.get(dia).push(p);
   }
+
+  let base = 0, baseCasa = 0, baseComprado = 0;
+  let bonus = 0, repetidos = 0, perdidoRepetindo = 0;
+  for (const [, doDia] of porDia) {
+    const jaViu = new Set();
+    for (const p of [...doDia].sort((a, b) => postTime(a) - postTime(b))) {
+      const repetida = !!p.mealType && jaViu.has(p.mealType);
+      if (p.mealType) jaViu.add(p.mealType);
+      const b = storedPlatePoints(p, challenge, repetida);
+      if (repetida) {
+        repetidos += 1;
+        perdidoRepetindo += storedPlatePoints(p, challenge, false) - b;
+      }
+      base += b;
+      // Separado prato a prato: com peso por refeição, dividir o total pela
+      // proporção de pratos daria um número que não é de ninguém.
+      if (p.homemade) baseCasa += b; else baseComprado += b;
+      bonus += applyStreak(b, streakFrom(daySet, diaDoPost(p)), challenge) - b;
+    }
+  }
+
+  // Pontos que não vieram de prato próprio.
+  const cravadas = Object.entries(member.extraPoints || {})
+    .filter(([d]) => noPeriodo(d))
+    .reduce((s, [, v]) => s + (Number(v) || 0), 0);
+  const eventos = Object.values(member.eventos || {})
+    .filter((e) => e?.bonus > 0 && noPeriodo(e.dia || ""))
+    .reduce((s, e) => s + (Number(e.bonus) || 0), 0);
 
   const scored = member.dayPoints || {};
   const guardado = Object.entries(scored)
-    .filter(([d]) => period === "all" || (d >= from && d <= to))
+    .filter(([d]) => noPeriodo(d))
     .reduce((s, [, v]) => s + (Number(v) || 0), 0);
 
   const caseiros = meus.filter((p) => p.homemade).length;
-  const total = base + bonus;
+  const total = base + bonus + cravadas + eventos;
   return {
     comprados: meus.length - caseiros,
     caseiros,
     base,
+    baseCasa,
+    baseComprado,
     bonus,
+    cravadas,
+    eventos,
+    repetidos,
+    perdidoRepetindo,
     total,
     guardado,
     // Diferença de arredondamento não conta; o bônus é múltiplo de 0,5.
@@ -1067,30 +1294,24 @@ export function standings(members, period, challenge, by = "days") {
     const days = (m.days || []).filter(inRange);
     const jokerDays = (m.jokerDays || []).filter(inRange);
 
+    /* A soma vem das CHAVES do `dayPoints`, não da lista `days`.
+       `days` só tem dia em que a pessoa postou, e nem todo ponto vem de
+       prato: cravar o preço de um prato alheio e fechar um evento também
+       pontuam. Somando por `days`, esses pontos apareciam no total geral e
+       sumiam ao escolher "semana" — o mesmo número dando dois valores. */
     const scored = m.dayPoints || {};
-    const dayPointsSum = Object.values(scored).reduce((sum, value) => sum + (Number(value) || 0), 0);
-    const memberTotalPoints = Number(m.totalPoints);
-    const hasValidTotalPoints = isFinite(memberTotalPoints) && memberTotalPoints > 0;
-    const baseExpected = (m.homemadeCount || 0) * 2 + (m.boughtCount || 0) * 1;
+    const soma = Object.entries(scored)
+      .filter(([dia]) => period === "all" || inRange(dia))
+      .reduce((sum, [, value]) => sum + (Number(value) || 0), 0);
 
-    let points = 0;
-    if (period === "all") {
-      if (hasValidTotalPoints && memberTotalPoints >= baseExpected) {
-        points = memberTotalPoints;
-      } else {
-        points = Math.max(memberTotalPoints || 0, dayPointsSum);
-      }
-    } else {
-      const periodSum = days.reduce((sum, day) => sum + (Number(scored[day]) || 0), 0);
-      // Se todos os dias do membro estão no período selecionado e o totalPoints for maior,
-      // usa o totalPoints para evitar defasagem no mapa dayPoints.
-      const allDaysInRange = (m.days || []).length > 0 && (m.days || []).every(inRange);
-      if (allDaysInRange && hasValidTotalPoints && memberTotalPoints >= periodSum) {
-        points = memberTotalPoints;
-      } else {
-        points = periodSum;
-      }
-    }
+    // No total geral, o incremental (`totalPoints`) e o detalhado (`dayPoints`)
+    // deveriam bater. Quando não batem, o maior é o que não perdeu nada — e o
+    // recap avisa quem está defasado em vez de esconder a diferença.
+    const memberTotalPoints = Number(m.totalPoints);
+    const points = period === "all" && isFinite(memberTotalPoints)
+      ? Math.max(soma, memberTotalPoints)
+      : soma;
+
     return { ...m, count: days.length, days, jokerDays, points };
   });
 
