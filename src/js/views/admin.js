@@ -6,6 +6,10 @@ import * as store from "../store.js";
 import { plateLink } from "./plates.js";
 import { formatKcal } from "../food.js";
 
+const fullData = (d) => d
+  ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+  : "—";
+
 /* ============================================================
    Painel administrativo
 
@@ -20,7 +24,8 @@ import { formatKcal } from "../food.js";
    ============================================================ */
 
 const ABAS = [
-  { id: "visao", label: "Visão geral" },
+  { id: "visao", label: "Visão" },
+  { id: "pratos", label: "Pratos" },
   { id: "erros", label: "Erros" },
   { id: "ia", label: "IA" },
 ];
@@ -58,7 +63,7 @@ export function adminView() {
 
   const body = el.querySelector("[data-body]");
   let aba = "visao";
-  let admin = null, metricas = null, logs = null, uso = null;
+  let admin = null, metricas = null, logs = null, uso = null, auditoria = null;
   let desafios = [], membros = [], posts = [];
   let paramos = false;
   const desinscrever = [];
@@ -118,6 +123,77 @@ export function adminView() {
             </span>
             <span class="bd-valor">${icon("chevron", 18)}</span>
           </button>`).join("") || `<div class="empty" style="padding:22px">Nenhum.</div>`}
+      </div>
+      <div class="gap"></div>`;
+  }
+
+  /* ---------- pratos: o que está torto e como consertar ---------- */
+
+  async function carregarAuditoria() {
+    const cid = desafios[0]?.id;
+    if (!cid) return;
+    auditoria = await store.auditarPratos(cid, desafios[0]).catch(() => []);
+    if (!paramos && aba === "pratos") desenhar();
+  }
+
+  function desenharPratos() {
+    if (auditoria === null) { carregarAuditoria(); return spinner(); }
+
+    const tortos = auditoria.filter((p) => p.problemas.length);
+    const cid = desafios[0]?.id || "";
+
+    const linha = (p, comBotao) => `
+      <div class="card log-card">
+        <div class="log-topo">
+          <span class="log-tipo">${esc(p.authorName || "sem autor")}</span>
+          <span class="log-n">${esc(p.dayKey || "sem dia")}</span>
+        </div>
+        <div class="log-msg">${esc(p.title || "Sem título")}</div>
+        ${p.problemas.length ? `<div class="log-codigo">${esc(p.problemas.join(" · "))}</div>` : ""}
+        <div class="log-meta">
+          data no post: ${p.at ? esc(fullData(p.at)) : "—"}<br>
+          carimbo do servidor: ${p.criado ? esc(fullData(p.criado)) : "—"}
+        </div>
+        <div class="pad" style="padding:10px 0 0">
+          <button class="btn btn-white" data-nav="/c/${cid}/p/${p.id}">Abrir o prato</button>
+          ${comBotao && p.sugestao ? `
+            <div class="gap-sm"></div>
+            <button class="btn btn-primary" data-consertar="${esc(p.id)}">
+              Corrigir para ${esc(fullData(p.sugestao))}
+            </button>` : ""}
+        </div>
+      </div>`;
+
+    return `
+      <div class="card"><div class="stats-row tight" style="padding:14px 6px">
+        ${celula(auditoria.length, "pratos no banco")}
+        ${celula(tortos.length, "com problema")}
+        ${celula(auditoria.filter((p) => !p.at).length, "sem data")}
+      </div></div>
+
+      <div class="pad hint-row" style="padding-top:0">
+        Esta lista lê os pratos sem nenhuma ordenação nem filtro — é a única
+        forma de enxergar um prato a que falta justamente o campo usado para
+        ordenar, que era o motivo de ele sumir do feed.
+      </div>
+
+      ${tortos.length ? `
+        <div class="section-label left">Precisam de conserto</div>
+        ${tortos.map((p) => linha(p, true)).join("")}
+      ` : `<div class="empty" style="padding:34px 30px">
+        <div class="big">✅</div><strong>Nenhum prato torto</strong>
+        Todos têm data, dia e autor coerentes.
+      </div>`}
+
+      <div class="section-label left">Todos os pratos (${auditoria.length})</div>
+      <div class="card breakdown">
+        ${auditoria.slice(0, 40).map((p) => `
+          <button class="bd-row" data-nav="/c/${cid}/p/${p.id}">
+            <span class="bd-label">${esc(p.title || "Sem título")}
+              <div class="bd-conta">${esc(p.authorName || "?")} · ${esc(p.dayKey || "sem dia")}</div>
+            </span>
+            <span class="bd-valor">${p.problemas.length ? "⚠️" : ""}</span>
+          </button>`).join("")}
       </div>
       <div class="gap"></div>`;
   }
@@ -246,13 +322,34 @@ export function adminView() {
       <div class="segmented compact" data-abas>
         ${ABAS.map((a) => `<button data-aba="${a.id}" class="${a.id === aba ? "active" : ""}">${a.label}</button>`).join("")}
       </div>
-      ${aba === "visao" ? desenharVisao() : aba === "erros" ? desenharErros() : desenharIA()}`;
+      ${aba === "visao" ? desenharVisao() : aba === "pratos" ? desenharPratos() : aba === "erros" ? desenharErros() : desenharIA()}`;
 
     body.querySelector("[data-abas]").addEventListener("click", (e) => {
       const btn = e.target.closest("[data-aba]");
       if (!btn || btn.dataset.aba === aba) return;
       aba = btn.dataset.aba;
       desenhar();
+    });
+
+    body.querySelectorAll("[data-consertar]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const prato = auditoria.find((p) => p.id === btn.dataset.consertar);
+        if (!prato) return;
+        if (!await confirmSheet(
+          `Corrigir "${prato.title || "esse prato"}" para ${fullData(prato.sugestao)}?`,
+          "Corrigir", false)) return;
+        btn.disabled = true;
+        btn.textContent = "Corrigindo…";
+        try {
+          const dia = await store.consertarPrato(desafios[0].id, prato);
+          toast(`Corrigido para ${dia}. O placar foi refeito.`);
+          auditoria = null;
+          desenhar();
+        } catch (err) {
+          btn.disabled = false;
+          toastError(err?.message || "Não deu pra corrigir.");
+        }
+      });
     });
 
     body.querySelectorAll("[data-limpar-grupo]").forEach((btn) => {

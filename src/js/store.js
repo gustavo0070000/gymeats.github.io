@@ -363,7 +363,12 @@ export function postDay(p) {
 export const byNewest = (a, b) => postTime(b) - postTime(a);
 
 export function watchFeed(cid, cb, max = 60) {
-  const q = query(collection(db, "challenges", cid, "posts"), orderBy("at", "desc"), limit(max));
+  // Ordena por `dayKey`, não por `at`. O Firestore EXCLUI do resultado todo
+  // documento que não tem o campo do orderBy — então um prato com `at`
+  // faltando sumia do feed inteiro, mesmo existindo e aparecendo na busca
+  // por data. `dayKey` é sempre gravado e é sempre string, então nenhum
+  // prato fica invisível por causa da ordenação.
+  const q = query(collection(db, "challenges", cid, "posts"), orderBy("dayKey", "desc"), limit(max));
   return onSnapshot(q, (snap) => {
     // O Firestore ordena por tipo antes de valor: se algum post tiver `at`
     // gravado num tipo diferente, a ordem volta embaralhada. Reordenamos
@@ -1040,10 +1045,9 @@ export function periodRange(period, challenge) {
     start.setMonth(0, 1);
     end.setMonth(11, 31);
   } else {
-    return {
-      start: new Date(2000, 0, 1),
-      end: toDate(challenge?.endDate) || new Date(2999, 0, 1),
-    };
+    // "Tudo" sem teto de propósito: cortar na data de fim do desafio fazia
+    // sumir prato lançado com data depois dela — inclusive do painel.
+    return { start: new Date(2000, 0, 1), end: new Date(2999, 0, 1) };
   }
   return { start, end };
 }
@@ -1271,4 +1275,66 @@ export function pratosPorDia(posts, dias = 14) {
     });
   }
   return serie;
+}
+
+/* ============================================================
+   Saúde dos pratos
+
+   Uma consulta com orderBy EXCLUI documento que não tem aquele campo.
+   Por isso a auditoria antiga (ordenada por createdAt) tinha o mesmo
+   ponto cego do feed: o prato quebrado era invisível justamente pra
+   ferramenta feita pra achá-lo. Aqui não há orderBy nem filtro — lê
+   tudo e classifica depois.
+   ============================================================ */
+
+/** Todos os pratos do desafio, sem nenhum filtro que possa esconder um. */
+export async function auditarPratos(cid, challenge = null) {
+  const snap = await getDocs(collection(db, "challenges", cid, "posts"));
+  const fim = toDate(challenge?.endDate);
+  const inicio = toDate(challenge?.startDate);
+  const amanha = new Date();
+  amanha.setDate(amanha.getDate() + 1);
+
+  return snap.docs.map((d) => {
+    const p = { id: d.id, ...d.data() };
+    const at = toDate(p.at);
+    const criado = toDate(p.createdAt);
+    const problemas = [];
+
+    if (!p.at) problemas.push("sem data (some do feed)");
+    else if (!at) problemas.push("data inválida");
+    if (!p.dayKey) problemas.push("sem dia");
+    if (at && at > amanha) problemas.push("data no futuro");
+    if (at && inicio && at < inicio) problemas.push("antes do desafio começar");
+    if (at && fim && at > fim) problemas.push("depois do fim do desafio");
+    if (p.dayKey && at && dayKey(at) !== p.dayKey) problemas.push("dia não bate com a data");
+    if (!p.uid) problemas.push("sem autor");
+
+    return {
+      ...p,
+      at, criado,
+      // O conserto usa o carimbo do servidor, que é o único imune a
+      // relógio errado de celular.
+      sugestao: criado || at || null,
+      problemas,
+    };
+  }).sort((a, b) => (b.at?.getTime() || 0) - (a.at?.getTime() || 0));
+}
+
+/**
+ * Reescreve data e dia de um prato a partir do carimbo do servidor.
+ * Depois recalcula a ficha de quem postou, senão o placar continua
+ * contando o dia velho.
+ */
+export async function consertarPrato(cid, prato, quando = null) {
+  const alvo = toDate(quando) || prato.criado || prato.at;
+  if (!alvo) throw new Error("Esse prato não tem nenhuma data aproveitável.");
+
+  await updateDoc(doc(db, "challenges", cid, "posts", prato.id), {
+    at: alvo,
+    dayKey: dayKey(alvo),
+    dateEditada: false,
+  });
+  if (prato.uid) await recountMember(cid, prato.uid);
+  return dayKey(alvo);
 }

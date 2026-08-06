@@ -109,8 +109,10 @@ service cloud.firestore {
         allow read: if isMember(cid);
         // cada um mexe na própria ficha; o dono também mexe nas dos outros,
         // porque é ele quem recalcula o placar ao apagar um post alheio
-        allow create, update: if isSelf(uid) || isOwner(cid);
-        allow delete: if isSelf(uid) || isOwner(cid);
+        // Admin entra aqui porque consertar a data de um prato obriga a
+        // refazer a ficha de quem postou — senão o placar fica com o dia velho.
+        allow create, update: if isSelf(uid) || isOwner(cid) || isAdmin();
+        allow delete: if isSelf(uid) || isOwner(cid) || isAdmin();
       }
 
       // ---------- Posts ----------
@@ -131,7 +133,7 @@ service cloud.firestore {
                           .hasOnly(['reactions', 'commentCount', 'ratings',
                                     'ratingAvg', 'ratingCount', 'guesses',
                                     'kcalGuesses']) ||
-                        (isOwner(cid) && request.resource.data.diff(resource.data)
+                        ((isOwner(cid) || isAdmin()) && request.resource.data.diff(resource.data)
                           .affectedKeys().hasOnly(['at', 'dayKey', 'dateEditada',
                                                    'place', 'placeKey', 'coords']))
                       );
