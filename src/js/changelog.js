@@ -19,15 +19,16 @@ export const NOTAS = [
   {
     versao: "v27",
     data: "2026-08-06",
-    titulo: "Regras na mão do dono",
+    titulo: "Nota anônima e ponto por cravar",
+    /* Configuração de refeições, selos e eventos ficou de fora da lista de
+       propósito: são coisas que só o dono do desafio faz, e ele prefere
+       apresentar no grupo do que soltar num modal. O código está publicado
+       do mesmo jeito — o que não está aqui é o anúncio. */
     itens: [
       "🕵️ As notas voltaram a ser anônimas de verdade: a notificação não diz mais quem deu, nem quanto foi. Antes desta versão o aviso trazia o nome e a nota — inclusive no histórico em Editar desafio → Notificações enviadas, que continua lá do jeito que saiu.",
       "🎯 Cravar o preço ou as calorias de um prato dos outros agora vale ponto. Chegar mais perto que a galera continua rendendo só o troféu.",
-      "⚖️ O dono do desafio escolhe quanto vale cada refeição. Dá pra criar \"pré/pós treino\" com peso 0,25 e o whey deixa de valer o mesmo que um almoço.",
       "🔁 Segundo prato da mesma refeição no mesmo dia não pontua de novo. Pode postar do mesmo jeito — a galera chuta preço e caloria nele.",
-      "🏅 Os selos do passaporte agora são configuráveis: dá pra criar novos, trocar o nome, usar emoji ou subir uma imagem.",
-      "🗓️ Eventos: \"Mês alemão — junte 3 selos e leve 2 pontos\". O bônus entra sozinho quando a pessoa fecha a conta.",
-      "🧾 Prato publicado antes desta versão mantém o valor que já tinha. A regra nova vale daqui pra frente.",
+      "🧾 Prato publicado antes desta versão mantém o valor que já tinha. As regras novas valem daqui pra frente.",
     ],
   },
 ];
